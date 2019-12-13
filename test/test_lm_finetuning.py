@@ -1,4 +1,6 @@
 import logging
+from pathlib import Path
+
 import numpy as np
 import torch
 
@@ -28,7 +30,7 @@ def test_lm_finetuning(caplog):
     )
 
     processor = BertStyleLMProcessor(
-        data_dir="samples/lm_finetuning",
+        data_dir=Path("samples/lm_finetuning"),
         train_filename="train-sample.txt",
         test_filename="test-sample.txt",
         dev_filename=None,
@@ -74,7 +76,7 @@ def test_lm_finetuning(caplog):
     assert torch.all(
         torch.eq(model.language_model.model.embeddings.word_embeddings.weight, model.prediction_heads[0].decoder.weight))
 
-    save_dir = "testsave/lm_finetuning"
+    save_dir = Path("testsave/lm_finetuning")
     model.save(save_dir)
     processor.save(save_dir)
 
@@ -105,7 +107,7 @@ def test_lm_finetuning_no_next_sentence(caplog):
     )
 
     processor = BertStyleLMProcessor(
-        data_dir="samples/lm_finetuning",
+        data_dir=Path("samples/lm_finetuning"),
         train_filename="train-sample.txt",
         test_filename="test-sample.txt",
         dev_filename=None,
@@ -150,7 +152,7 @@ def test_lm_finetuning_no_next_sentence(caplog):
     assert torch.all(
         torch.eq(model.language_model.model.embeddings.word_embeddings.weight, model.prediction_heads[0].decoder.weight))
 
-    save_dir = "testsave/lm_finetuning_no_nsp"
+    save_dir = Path("testsave/lm_finetuning_no_nsp")
     model.save(save_dir)
     processor.save(save_dir)
 
@@ -182,7 +184,7 @@ def test_lm_finetuning_custom_vocab(caplog):
     tokenizer.add_tokens(["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbb", "ccccccccccccccccccccccc"])
 
     processor = BertStyleLMProcessor(
-        data_dir="samples/lm_finetuning",
+        data_dir=Path("samples/lm_finetuning"),
         train_filename="train-sample.txt",
         test_filename="test-sample.txt",
         dev_filename=None,
@@ -228,7 +230,7 @@ def test_lm_finetuning_custom_vocab(caplog):
     assert torch.all(
         torch.eq(model.language_model.model.embeddings.word_embeddings.weight, model.prediction_heads[0].decoder.weight))
 
-    save_dir = "testsave/lm_finetuning"
+    save_dir = Path("testsave/lm_finetuning")
     model.save(save_dir)
     processor.save(save_dir)
 

@@ -18,9 +18,11 @@ Thanks for the great work! """
 
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+import json
 import logging
 import os
-import json
+from pathlib import Path
+
 import numpy as np
 import torch
 from torch import nn
@@ -80,7 +82,7 @@ class LanguageModel(nn.Module):
         :type pretrained_model_name_or_path: str
 
         """
-        config_file = os.path.join(pretrained_model_name_or_path, "language_model_config.json")
+        config_file = Path(pretrained_model_name_or_path) / "language_model_config.json"
         if os.path.exists(config_file):
             # it's a local directory
             config = json.load(open(config_file))
@@ -137,7 +139,7 @@ class LanguageModel(nn.Module):
         :type save_dir: str
         """
         # Save Weights
-        save_name = os.path.join(save_dir, "language_model.bin")
+        save_name = save_dir / "language_model.bin"
         model_to_save = (
             self.model.module if hasattr(self.model, "module") else self.model
         )  # Only save the model it-self
@@ -264,11 +266,11 @@ class Bert(LanguageModel):
         else:
             bert.name = pretrained_model_name_or_path
         # We need to differentiate between loading model using FARM format and Pytorch-Transformers format
-        farm_lm_config = os.path.join(pretrained_model_name_or_path, "language_model_config.json")
+        farm_lm_config = Path(pretrained_model_name_or_path) / "language_model_config.json"
         if os.path.exists(farm_lm_config):
             # FARM style
             bert_config = BertConfig.from_pretrained(farm_lm_config)
-            farm_lm_model = os.path.join(pretrained_model_name_or_path, "language_model.bin")
+            farm_lm_model = Path(pretrained_model_name_or_path) / "language_model.bin"
             bert.model = BertModel.from_pretrained(farm_lm_model, config=bert_config, **kwargs)
             bert.language = bert.model.config.language
         else:
@@ -317,7 +319,7 @@ class Bert(LanguageModel):
         self.model.encoder.output_hidden_states = False
 
     def save_config(self, save_dir):
-        save_filename = os.path.join(save_dir, "language_model_config.json")
+        save_filename = save_dir / "language_model_config.json"
         with open(save_filename, "w") as file:
             setattr(self.model.config, "name", self.__class__.__name__)
             setattr(self.model.config, "language", self.language)
@@ -354,11 +356,11 @@ class Bert(LanguageModel):
 #         albert = cls()
 #         albert.name = pretrained_model_name_or_path
 #         # We need to differentiate between loading model using FARM format and Pytorch-Transformers format
-#         farm_lm_config = os.path.join(pretrained_model_name_or_path, "language_model_config.json")
+#         farm_lm_config = pretrained_model_name_or_path / "language_model_config.json"
 #         if os.path.exists(farm_lm_config):
 #             # FARM style
 #             config = AlbertConfig.from_pretrained(farm_lm_config)
-#             farm_lm_model = os.path.join(pretrained_model_name_or_path, "language_model.bin")
+#             farm_lm_model = pretrained_model_name_or_path / "language_model.bin"
 #             albert.model = AlbertModel.from_pretrained(farm_lm_model, config=config, **kwargs)
 #             albert.language = albert.model.config.language
 #         else:
@@ -407,7 +409,7 @@ class Bert(LanguageModel):
 #         self.model.encoder.output_hidden_states = False
 #
 #     def save_config(self, save_dir):
-#         save_filename = os.path.join(save_dir, "language_model_config.json")
+#         save_filename = save_dir / "language_model_config.json"
 #         with open(save_filename, "w") as file:
 #             setattr(self.model.config, "name", self.__class__.__name__)
 #             setattr(self.model.config, "language", self.language)
@@ -448,11 +450,11 @@ class Roberta(LanguageModel):
         else:
             roberta.name = pretrained_model_name_or_path
         # We need to differentiate between loading model using FARM format and Pytorch-Transformers format
-        farm_lm_config = os.path.join(pretrained_model_name_or_path, "language_model_config.json")
+        farm_lm_config = Path(pretrained_model_name_or_path) / "language_model_config.json"
         if os.path.exists(farm_lm_config):
             # FARM style
             config = RobertaConfig.from_pretrained(farm_lm_config)
-            farm_lm_model = os.path.join(pretrained_model_name_or_path, "language_model.bin")
+            farm_lm_model = pretrained_model_name_or_path / "language_model.bin"
             roberta.model = RobertaModel.from_pretrained(farm_lm_model, config=config, **kwargs)
             roberta.language = roberta.model.config.language
         else:
@@ -501,7 +503,7 @@ class Roberta(LanguageModel):
         self.model.encoder.output_hidden_states = False
 
     def save_config(self, save_dir):
-        save_filename = os.path.join(save_dir, "language_model_config.json")
+        save_filename = save_dir / "language_model_config.json"
         with open(save_filename, "w") as file:
             setattr(self.model.config, "name", self.__class__.__name__)
             setattr(self.model.config, "language", self.language)
@@ -543,11 +545,11 @@ class XLNet(LanguageModel):
         else:
             xlnet.name = pretrained_model_name_or_path
         # We need to differentiate between loading model using FARM format and Pytorch-Transformers format
-        farm_lm_config = os.path.join(pretrained_model_name_or_path, "language_model_config.json")
+        farm_lm_config = pretrained_model_name_or_path / "language_model_config.json"
         if os.path.exists(farm_lm_config):
             # FARM style
             config = XLNetConfig.from_pretrained(farm_lm_config)
-            farm_lm_model = os.path.join(pretrained_model_name_or_path, "language_model.bin")
+            farm_lm_model = pretrained_model_name_or_path / "language_model.bin"
             xlnet.model = XLNetModel.from_pretrained(farm_lm_model, config=config, **kwargs)
             xlnet.language = xlnet.model.config.language
         else:
@@ -612,7 +614,7 @@ class XLNet(LanguageModel):
         self.model.output_hidden_states = False
 
     def save_config(self, save_dir):
-        save_filename = os.path.join(save_dir, "language_model_config.json")
+        save_filename = save_dir / "language_model_config.json"
         with open(save_filename, "w") as file:
             setattr(self.model.config, "name", self.__class__.__name__)
             setattr(self.model.config, "language", self.language)

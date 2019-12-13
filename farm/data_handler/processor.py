@@ -1,12 +1,13 @@
-import os
 import abc
-from abc import ABC
-import random
-import logging
-import json
-import time
 import inspect
+import json
+import logging
+import os
+import random
+from abc import ABC
 from inspect import signature
+from pathlib import Path
+
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 
@@ -22,6 +23,7 @@ from farm.data_handler.samples import (
     SampleBasket,
     create_samples_squad,
 )
+from farm.data_handler.utils import get_sentence_pair
 from farm.data_handler.utils import (
     read_tsv,
     read_docs_from_txt,
@@ -31,7 +33,6 @@ from farm.data_handler.utils import (
 )
 from farm.modeling.tokenization import Tokenizer, tokenize_with_metadata, truncate_sequences
 from farm.utils import MLFlowLogger as MlLogger, encode_squad_id
-from farm.data_handler.utils import get_sentence_pair
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +164,7 @@ class Processor(ABC):
         :return: An instance of a Processor Subclass (e.g. GNADProcessor)
         """
         # read config
-        processor_config_file = os.path.join(load_dir, "processor_config.json")
+        processor_config_file = load_dir / "processor_config.json"
         config = json.load(open(processor_config_file))
         # init tokenizer
         if "lower_case" in config.keys():
@@ -201,7 +202,7 @@ class Processor(ABC):
         self.tokenizer.save_pretrained(save_dir)
         # save processor
         config["processor"] = self.__class__.__name__
-        output_config_file = os.path.join(save_dir, "processor_config.json")
+        output_config_file = save_dir / "processor_config.json"
         with open(output_config_file, "w") as file:
             json.dump(config, file)
 
@@ -213,6 +214,8 @@ class Processor(ABC):
         # self.__dict__ doesn't give parent class attributes
         for key, value in inspect.getmembers(self):
             if is_json(value) and key[0] != "_":
+                if issubclass(type(value), Path):
+                    value = str(value)
                 config[key] = value
         return config
 
@@ -246,7 +249,7 @@ class Processor(ABC):
 
     def _init_baskets_from_file(self, file):
         dicts = self.file_to_dicts(file)
-        dataset_name = os.path.splitext(os.path.basename(file))[0]
+        dataset_name = file.stem
         baskets = [
             SampleBasket(raw=tr, id=f"{dataset_name}-{i}") for i, tr in enumerate(dicts)
         ]
@@ -459,7 +462,7 @@ class InferenceProcessor(Processor):
         :return: An instance of an InferenceProcessor
         """
         # read config
-        processor_config_file = os.path.join(load_dir, "processor_config.json")
+        processor_config_file = load_dir / "processor_config.json"
         config = json.load(open(processor_config_file))
         # init tokenizer
         tokenizer = Tokenizer.load(load_dir, tokenizer_class=config["tokenizer"])
