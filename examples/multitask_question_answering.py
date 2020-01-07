@@ -16,22 +16,23 @@ from farm.utils import set_all_seeds, MLFlowLogger, initialize_device_settings
 set_all_seeds(seed=42)
 device, n_gpu = initialize_device_settings(use_cuda=True)
 
-batch_size = 32
+batch_size = 64
 n_epochs = 2
 
 base_LM_model = "bert-base-cased"
-#train_filename = "train-v2.0.json"
-train_filename = "dev-v2.0.json"
+#base_LM_model = "bert-large-uncased-whole-word-masking"
+train_filename = "train-v2.0.json"
 dev_filename = "dev-v2.0.json"
+grad_acc_steps=1
 evaluate_every = 500
-#max_seq_len = 384
-max_seq_len = 256
+max_seq_len = 384
+#max_seq_len = 256
 learning_rate = 3e-5
 warmup_proportion = 0.1
-save_dir = "./MultiTask_QA_Classification_" + base_LM_model
+save_dir = "./MultiTask_QA_Classification_" + str(base_LM_model) + "_max_seq_len_" + str(max_seq_len) + "_grad_acc_steps_" + str(grad_acc_steps)
 print(save_dir)
 
-inference = False
+inference = True
 train = True
 
 #variables for inference
@@ -105,7 +106,8 @@ if train:
       schedule_opts={"name": "LinearWarmup", "warmup_proportion": 0.2},
       n_batches=len(data_silo.loaders["train"]),
       n_epochs=n_epochs,
-      device=device
+      device=device,
+      grad_acc_steps=grad_acc_steps,
   )
 
   # 6. Feed everything to the Trainer, which keeps care of growing our model and evaluates it from time to time
@@ -118,6 +120,7 @@ if train:
       lr_schedule=lr_schedule,
       evaluate_every=evaluate_every,
       device=device,
+      grad_acc_steps=grad_acc_steps,
   )
 
   # 7. Let it grow! Watch the tracked metrics live on the public mlflow server: https://public-mlflow.deepset.ai
