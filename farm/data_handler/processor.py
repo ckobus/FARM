@@ -1100,3 +1100,192 @@ class RegressionProcessor(Processor):
             tokenizer=self.tokenizer
         )
         return features
+
+#########################################
+# SQUAD 2.0 Processor ####
+#########################################
+
+class SquadbisProcessor(Processor):
+    """ Used to handle the SQuAD dataset _ Multitask setup"""
+
+    def __init__(
+        self,
+        tokenizer,
+        max_seq_len,
+        data_dir,
+        label_list=None,
+        metric=["squad", "f1_macro"],
+        train_filename="train-v2.0.json",
+        dev_filename="dev-v2.0.json",
+        test_filename=None,
+        dev_split=0,
+        doc_stride=128,
+        max_query_length=64,
+        proxies=None,
+        **kwargs
+    ):
+        """
+        :param tokenizer: Used to split a sentence (str) into tokens.
+        :param max_seq_len: Samples are truncated after this many tokens.
+        :type max_seq_len: int
+        :param data_dir: The directory in which the train and dev files can be found. Squad has a private test file
+        :type data_dir: str
+        :param label_list: list of labels to predict (strings). For most cases this should be: ["start_token", "end_token"]
+        :type label_list: list
+        :param metric: name of metric that shall be used for evaluation, can be "squad" or "squad_top_recall"
+        :type metric: str
+        :param train_filename: The name of the file containing training data.
+        :type train_filename: str
+        :param dev_filename: The name of the file containing the dev data. If None and 0.0 < dev_split < 1.0 the dev set
+                             will be a slice of the train set.
+        :type dev_filename: str or None
+        :param test_filename: None
+        :type test_filename: str
+        :param dev_split: The proportion of the train set that will sliced. Only works if dev_filename is set to None
+        :type dev_split: float
+        :param doc_stride: When the document containing the answer is too long it gets split into part, strided by doc_stride
+        :type doc_stride: int
+        :param max_query_length: Maximum length of the question (in number of subword tokens)
+        :type max_query_length: int
+        :param kwargs: placeholder for passing generic parameters
+        :type kwargs: object
+        """
+
+        self.target = "classification"
+        self.ph_output_type = "per_token_squad"
+
+        self.doc_stride = doc_stride
+        self.max_query_length = max_query_length
+
+        super(SquadbisProcessor, self).__init__(
+            tokenizer=tokenizer,
+            max_seq_len=max_seq_len,
+            train_filename=train_filename,
+            dev_filename=dev_filename,
+            test_filename=test_filename,
+            dev_split=dev_split,
+            data_dir=data_dir,
+            tasks={},
+            proxies=proxies
+        )
+
+        if len(metric) == len(label_list):
+            self.add_task("text_classification", metric[0], label_list[0], task_type="classification")
+            self.add_task("question_answering", metric[1], label_list[1], task_type="question_answering")
+        else:
+            logger.info("Initialized processor without tasks. Supply `metric` and `label_list` to the constructor for "
+                        "using the default task or add a custom task later via processor.add_task()")
+
+    def dataset_from_dicts(self, dicts, index=None, rest_api_schema=False, return_baskets=False):
+        """ Overwrites the method from the base class since Question Answering processing is quite different.
+        This method allows for documents and questions to be tokenized earlier. Then SampleBaskets are initialized
+        with one document and one question. """
+
+        if rest_api_schema:
+            dicts = [self._convert_rest_api_dict(x) for x in dicts]
+        self.baskets = self._dicts_to_baskets(dicts, index)
+        self._init_samples_in_baskets()
+        self._featurize_samples()
+        if index == 0:
+            self._log_samples(2)
+        # This mode is for inference where we need to keep baskets
+        if return_baskets:
+            dataset, tensor_names = self._create_dataset(keep_baskets=True)
+            return dataset, tensor_names, self.baskets
+        # This mode is for training where we can free ram by removing baskets
+        else:
+            dataset, tensor_names = self._create_dataset(keep_baskets=False)
+            return dataset, tensor_names
+
+    def _dicts_to_baskets(self, dicts, index=None):
+        # Perform tokenization on documents and questions resulting in a nested list of doc-question pairs
+        dicts_tokenized = [self.apply_tokenization(d) for d in dicts]
+
+        baskets = []
+        for d_idx, document in enumerate(dicts_tokenized):
+            for q_idx, raw in enumerate(document):
+                squad_id_hex = dicts[d_idx]["qas"][q_idx]["id"]
+                if squad_id_hex is None:
+                    id_1 = d_idx + index
+                    id_2 = q_idx
+                else:
+                    id_1, id_2 = encode_squad_id(squad_id_hex)
+                basket = SampleBasket(raw=raw, id=f"{id_1}-{id_2}")
+                baskets.append(basket)
+        return baskets
+
+
+    def apply_tokenization(self, dictionary):
+        """ This performs tokenization on all documents and questions. The result is a list (unnested)
+        where each entry is a dictionary for one document-question pair (potentially mutliple answers). """
+
+        raw_baskets = []
+        document_text = dictionary["context"]
+        document_tokenized = tokenize_with_metadata(document_text, self.tokenizer)
+        document_start_of_word = [int(x) for x in document_tokenized["start_of_word"]]
+        questions = dictionary["qas"]
+        for question in questions:
+            squad_id = question["id"]
+            question_text = question["question"]
+            question_tokenized = tokenize_with_metadata(question_text, self.tokenizer)
+            question_start_of_word = [int(x) for x in question_tokenized["start_of_word"]]
+            answers = []
+            for answer in question["answers"]:
+                a = {"text": answer["text"],
+                     "offset": answer["answer_start"]}
+                answers.append(a)
+            raw = {"document_text": document_text,
+                   "document_tokens": document_tokenized["tokens"],
+                   "document_offsets": document_tokenized["offsets"],
+                   "document_start_of_word": document_start_of_word,
+                   "question_text": question_text,
+                   "question_tokens": question_tokenized["tokens"],
+                   "question_offsets": question_tokenized["offsets"],
+                   "question_start_of_word": question_start_of_word,
+                   "answers": answers,
+                   "is_impossible": question["is_impossible"],
+                   "squad_id": squad_id}
+            raw_baskets.append(raw)
+        return raw_baskets
+
+    def _convert_rest_api_dict(self, infer_dict):
+        # convert input coming from inferencer to SQuAD format
+        if len(infer_dict.get("questions")) > 1:
+            raise ValueError("Inferencer currently does not support answering multiple questions on a text."
+                                "As a workaround, multiple input dicts with text and question pairs can be "
+                                "supplied in a single API request.")
+        converted = {
+            "qas": [
+                {
+                    "question": infer_dict.get("questions", ["Missing?"])[0],
+                    "id": None,
+                    "answers": [],
+                    "is_impossible": False
+                }
+            ],
+            "context": infer_dict.get("text", "Missing!"),
+            "document_id": infer_dict.get("document_id", None),
+        }
+        return converted
+
+    def file_to_dicts(self, file: str) -> [dict]:
+        nested_dicts = read_squad_file(filename=file)
+        dicts = [y for x in nested_dicts for y in x["paragraphs"]]
+        return dicts
+
+    def _dict_to_samples(self, dictionary: dict, **kwargs) -> [Sample]:
+        n_special_tokens = self.tokenizer.num_added_tokens(pair=True)
+        samples = create_samples_squad(dictionary=dictionary,
+                                       max_query_len=self.max_query_length,
+                                       max_seq_len=self.max_seq_len,
+                                       doc_stride=self.doc_stride,
+                                       n_special_tokens=n_special_tokens)
+        return samples
+
+    def _sample_to_features(self, sample) -> dict:
+        # TODO, make this function return one set of features per sample
+        features = sample_to_features_squad_multitask(sample=sample,
+                                            tasks=self.tasks,
+                                            tokenizer=self.tokenizer,
+                                            max_seq_len=self.max_seq_len)
+        return features

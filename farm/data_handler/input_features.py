@@ -18,6 +18,130 @@ from farm.modeling.tokenization import insert_at_special_tokens_pos
 
 logger = logging.getLogger(__name__)
 
+def sample_to_features_squad_multitask(sample, tasks, tokenizer, max_seq_len, max_answers=6):
+    """ Prepares data for processing by the model. Supports cases where there are
+    multiple answers for the one question/document pair. max_answers is by default set to 6 since
+    that is the most number of answers in the squad2.0 dev set."""
+
+    # Initialize some basic variables
+    is_impossible = sample.clear_text["is_impossible"]
+    question_tokens = sample.tokenized["question_tokens"]
+    question_start_of_word = sample.tokenized["question_start_of_word"]
+    question_len_t = len(question_tokens)
+    passage_start_t = sample.tokenized["passage_start_t"]
+    passage_tokens = sample.tokenized["passage_tokens"]
+    passage_start_of_word = sample.tokenized["passage_start_of_word"]
+    passage_len_t = len(passage_tokens)
+    answers = sample.tokenized["answers"]
+
+    # Turn sample_id into a list of ints (len 3) where the ints are the two halves of the squad_id
+    # converted to base 10 (see utils.encode_squad_id) and the passage_id
+    sample_id = [int(x) for x in sample.id.split("-")]
+
+    # Generates a numpy array of shape (max_answers, 2) where (i, 2) indexes into the start and end indixes
+    # of the ith answer. The array is filled with -1 since the number of answers is often less than max_answers
+    # no answer labels are represented by (0,0)
+    labels = generate_labels(answers,
+                             passage_len_t,
+                             question_len_t,
+                             tokenizer,
+                             max_answers)
+
+    # Generate a start of word vector for the full sequence (i.e. question + answer + special tokens).
+    # This will allow us to perform evaluation during training without clear text.
+    # Note that in the current implementation, special tokens do not count as start of word.
+    start_of_word = combine_vecs(question_start_of_word, passage_start_of_word, tokenizer, spec_tok_val=0)
+
+    # Combines question_tokens and passage_tokens (str) into a single encoded vector of token indices (int)
+    # called input_ids. This encoded vector also contains special tokens (e.g. [CLS]). It will have length =
+    # (question_len_t + passage_len_t + n_special_tokens). This may be less than max_seq_len but will not be greater
+    # than max_seq_len since truncation was already performed when the document was chunked into passages
+    # (c.f. create_samples_squad() )
+    encoded = tokenizer.encode_plus(text=sample.tokenized["question_tokens"],
+                                    text_pair=sample.tokenized["passage_tokens"],
+                                    add_special_tokens=True,
+                                    max_length=None,
+                                    truncation_strategy='only_second',
+                                    return_tensors=None)
+    input_ids = encoded["input_ids"]
+    segment_ids = encoded["token_type_ids"]
+
+    # seq_2_start_t is the index of the first token in the second text sequence (e.g. passage)
+    seq_2_start_t = segment_ids.index(1)
+
+    # The mask has 1 for real tokens and 0 for padding tokens. Only real
+    # tokens are attended to.
+    padding_mask = [1] * len(input_ids)
+
+    # Pad up to the sequence length. For certain models, the pad token id is not 0 (e.g. Roberta where it is 1)
+    pad_idx = tokenizer.pad_token_id
+    padding = [pad_idx] * (max_seq_len - len(input_ids))
+    zero_padding = [0] * (max_seq_len - len(input_ids))
+
+    input_ids += padding
+    padding_mask += zero_padding
+    segment_ids += zero_padding
+    start_of_word += zero_padding
+
+    # The Roberta tokenizer generates a segment_ids vector that separates the first sequence from the second.
+    # However, when this is passed in to the forward fn of the Roberta model, it throws an error since
+    # Roberta has only a single token embedding (!!!). To get around this, we want to have a segment_ids
+    # vec that is only 0s
+    if tokenizer.__class__.__name__ == "RobertaTokenizer":
+        segment_ids = np.zeros_like(segment_ids)
+
+    # Todo: explain how only the first of labels will be used in train, and the full array will be used in eval
+    # TODO Offset, start of word and spec_tok_mask are not actually needed by model.forward() but are needed for model.formatted_preds()
+    # TODO passage_start_t is index of passage's first token  relative to document
+    # I don't think we actually need offsets anymore
+    feature_dict = {"input_ids": input_ids,
+                    "padding_mask": padding_mask,
+                    "segment_ids": segment_ids,
+                    "is_impossible": is_impossible,
+                    "id": sample_id,
+                    "passage_start_t": passage_start_t,
+                    "start_of_word": start_of_word,
+                    "labels": labels,
+                    "seq_2_start_t": seq_2_start_t}
+
+    # Add Labels for different tasks
+    for task_name, task in tasks.items():
+        if not task["task_type"] == "question_answering":
+            #print(task["label_name"])
+            #print(task["task_type"])
+            #print(task["label_list"])
+            try:
+                label_name = task["label_name"]
+                #print(sample.clear_text)
+                if sample.clear_text["is_impossible"] == False:
+                    label_raw = "SPAN"
+                else:
+                    label_raw = "NONE" 
+                #label_raw = sample.clear_text[label_name]
+                label_list = task["label_list"]
+                if task["task_type"] == "classification":
+                    # id of label
+                    try:
+                        label_ids = [label_list.index(label_raw)]
+                    except ValueError as e:
+                        raise ValueError(f'[Task: {task_name}] Observed label {label_raw} not in defined label_list')
+                elif task["task_type"] == "multilabel_classification":
+                    # multi-hot-format
+                    label_ids = [0] * len(label_list)
+                    for l in label_raw.split(","):
+                        if l != "":
+                            label_ids[label_list.index(l)] = 1
+                elif task["task_type"] == "regression":
+                    label_ids = [float(label_raw)]
+                else:
+                    raise ValueError(task["task_type"])
+            except KeyError:
+                # For inference mode we don't expect labels
+                label_ids = None
+            if label_ids is not None:
+                feature_dict[task["label_tensor_name"]] = label_ids
+    #print(feature_dict)
+    return [feature_dict]
 
 def sample_to_features_text(
     sample, tasks, max_seq_len, tokenizer
