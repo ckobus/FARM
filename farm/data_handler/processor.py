@@ -16,6 +16,7 @@ from farm.data_handler.input_features import (
     samples_to_features_bert_lm,
     sample_to_features_text,
     sample_to_features_squad,
+    sample_to_features_squad_multitask,
 )
 from farm.data_handler.samples import (
     Sample,
@@ -1176,17 +1177,17 @@ class SquadbisProcessor(Processor):
             logger.info("Initialized processor without tasks. Supply `metric` and `label_list` to the constructor for "
                         "using the default task or add a custom task later via processor.add_task()")
 
-    def dataset_from_dicts(self, dicts, index=None, rest_api_schema=False, return_baskets=False):
+    def dataset_from_dicts(self, dicts, indices=None, rest_api_schema=False, return_baskets=False):
         """ Overwrites the method from the base class since Question Answering processing is quite different.
         This method allows for documents and questions to be tokenized earlier. Then SampleBaskets are initialized
         with one document and one question. """
 
         if rest_api_schema:
             dicts = [self._convert_rest_api_dict(x) for x in dicts]
-        self.baskets = self._dicts_to_baskets(dicts, index)
+        self.baskets = self._dicts_to_baskets(dicts, indices)
         self._init_samples_in_baskets()
         self._featurize_samples()
-        if index == 0:
+        if 0 in indices:
             self._log_samples(2)
         # This mode is for inference where we need to keep baskets
         if return_baskets:
@@ -1197,20 +1198,14 @@ class SquadbisProcessor(Processor):
             dataset, tensor_names = self._create_dataset(keep_baskets=False)
             return dataset, tensor_names
 
-    def _dicts_to_baskets(self, dicts, index=None):
+    def _dicts_to_baskets(self, dicts, indices):
         # Perform tokenization on documents and questions resulting in a nested list of doc-question pairs
         dicts_tokenized = [self.apply_tokenization(d) for d in dicts]
 
         baskets = []
-        for d_idx, document in enumerate(dicts_tokenized):
+        for index, document in zip(indices, dicts_tokenized):
             for q_idx, raw in enumerate(document):
-                squad_id_hex = dicts[d_idx]["qas"][q_idx]["id"]
-                if squad_id_hex is None:
-                    id_1 = d_idx + index
-                    id_2 = q_idx
-                else:
-                    id_1, id_2 = encode_squad_id(squad_id_hex)
-                basket = SampleBasket(raw=raw, id=f"{id_1}-{id_2}")
+                basket = SampleBasket(raw=raw, id=f"{index}-{q_idx}")
                 baskets.append(basket)
         return baskets
 
