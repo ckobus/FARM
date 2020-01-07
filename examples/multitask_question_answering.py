@@ -16,8 +16,7 @@ from farm.utils import set_all_seeds, MLFlowLogger, initialize_device_settings
 set_all_seeds(seed=42)
 device, n_gpu = initialize_device_settings(use_cuda=True)
 
-#batch_size = 32
-batch_size = 16
+batch_size = 32
 n_epochs = 2
 
 base_LM_model = "bert-base-cased"
@@ -100,12 +99,13 @@ if train:
   )
 
   # 5. Create an optimizer
-  optimizer, warmup_linear = initialize_optimizer(
+  model, optimizer, lr_schedule = initialize_optimizer(
       model=model,
       learning_rate=learning_rate,
-      warmup_proportion=warmup_proportion,
+      schedule_opts={"name": "LinearWarmup", "warmup_proportion": 0.2},
       n_batches=len(data_silo.loaders["train"]),
       n_epochs=n_epochs,
+      device=device
   )
 
   # 6. Feed everything to the Trainer, which keeps care of growing our model and evaluates it from time to time
@@ -114,7 +114,8 @@ if train:
       data_silo=data_silo,
       epochs=n_epochs,
       n_gpu=n_gpu,
-      warmup_linear=warmup_linear,
+      #warmup_linear=warmup_linear,
+      lr_schedule=lr_schedule,
       evaluate_every=evaluate_every,
       device=device,
   )
