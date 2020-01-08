@@ -16,17 +16,20 @@ from farm.utils import set_all_seeds, MLFlowLogger, initialize_device_settings
 set_all_seeds(seed=42)
 device, n_gpu = initialize_device_settings(use_cuda=True)
 
-batch_size = 64
+#batch_size = 64
+batch_size = 16
 n_epochs = 2
 
 base_LM_model = "bert-base-cased"
 #base_LM_model = "bert-large-uncased-whole-word-masking"
-train_filename = "train-v2.0.json"
-dev_filename = "dev-v2.0.json"
+#train_filename = "train-v2.0.json"
+train_filename = "dev-v2.0.json"
+#dev_filename = "dev-v2.0.json"
+dev_filename = "test"
 grad_acc_steps=1
-evaluate_every = 500
-max_seq_len = 384
-#max_seq_len = 256
+evaluate_every = 1
+#max_seq_len = 384
+max_seq_len = 256
 learning_rate = 3e-5
 warmup_proportion = 0.1
 save_dir = "./MultiTask_QA_Classification_" + str(base_LM_model) + "_max_seq_len_" + str(max_seq_len) + "_grad_acc_steps_" + str(grad_acc_steps)
@@ -62,7 +65,7 @@ if train:
   ## to include later "YES" and "NO"
   qa_label_list = ["start_token", "end_token"]
   metric="squad"
-  metrics=["squad", "f1_macro"]
+  metrics=["f1_macro", "squad"]
   processor = SquadbisProcessor(
                 tokenizer=tokenizer,
                 max_seq_len=max_seq_len,
@@ -93,9 +96,9 @@ if train:
 
   model=AdaptiveModel(
     language_model=language_model,
-    prediction_heads=[qa_prediction_head, qa_classification_head],
+    prediction_heads=[qa_classification_head, qa_prediction_head],
     embeds_dropout_prob=0.1,
-    lm_output_types=["per_token","per_sequence"],
+    lm_output_types=["per_sequence", "per_token"],
     device=device
   )
 
