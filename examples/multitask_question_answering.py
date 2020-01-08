@@ -16,20 +16,20 @@ from farm.utils import set_all_seeds, MLFlowLogger, initialize_device_settings
 set_all_seeds(seed=42)
 device, n_gpu = initialize_device_settings(use_cuda=True)
 
-#batch_size = 64
-batch_size = 16
+batch_size = 64
+#batch_size = 16
 n_epochs = 2
 
 base_LM_model = "bert-base-cased"
 #base_LM_model = "bert-large-uncased-whole-word-masking"
-#train_filename = "train-v2.0.json"
-train_filename = "dev-v2.0.json"
-#dev_filename = "dev-v2.0.json"
-dev_filename = "test"
+train_filename = "train-v2.0.json"
+#train_filename = "dev-v2.0.json"
+dev_filename = "dev-v2.0.json"
+#dev_filename = "test"
 grad_acc_steps=1
-evaluate_every = 1
-#max_seq_len = 384
-max_seq_len = 256
+evaluate_every = 5000
+max_seq_len = 384
+#max_seq_len = 256
 learning_rate = 3e-5
 warmup_proportion = 0.1
 save_dir = "./MultiTask_QA_Classification_" + str(base_LM_model) + "_max_seq_len_" + str(max_seq_len) + "_grad_acc_steps_" + str(grad_acc_steps)
@@ -106,7 +106,7 @@ if train:
   model, optimizer, lr_schedule = initialize_optimizer(
       model=model,
       learning_rate=learning_rate,
-      schedule_opts={"name": "LinearWarmup", "warmup_proportion": 0.2},
+      schedule_opts={"name": "LinearWarmup", "warmup_proportion": warmup_proportion},
       n_batches=len(data_silo.loaders["train"]),
       n_epochs=n_epochs,
       device=device,
