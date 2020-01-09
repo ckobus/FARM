@@ -284,9 +284,13 @@ class TextClassificationHead(PredictionHead):
         labels = [self.label_list[int(x)] for x in label_ids]
         return labels
 
-    def formatted_preds(self, logits, samples, return_class_probs=False, **kwargs):
+    def formatted_preds(self, logits, samples=None, baskets=None, return_class_probs=False, **kwargs):
         preds = self.logits_to_preds(logits)
         probs = self.logits_to_probs(logits, return_class_probs)
+
+        if baskets:
+            samples = [s for b in baskets for s in b.samples]
+
         contexts = [sample.clear_text["passage_text"] for sample in samples]
 
         assert len(preds) == len(probs) == len(contexts)
@@ -383,7 +387,7 @@ class MultiLabelTextClassificationHead(PredictionHead):
             labels.append([self.label_list[int(x)] for x in row])
         return labels
 
-    def formatted_preds(self, logits, samples, **kwargs):
+    def formatted_preds(self, logits, samples=None, baskets=None, **kwargs):
         preds = self.logits_to_preds(logits)
         probs = self.logits_to_probs(logits)
         contexts = [sample.clear_text["text"] for sample in samples]
@@ -950,18 +954,15 @@ class QuestionAnsweringHead(PredictionHead):
         # passage_start_t is the token index of the passage relative to the document (usually a multiple of doc_stride)
         # seq_2_start_t is the token index of the first token in passage relative to the input sequence (i.e. number of
         # special tokens and question tokens that come before the passage tokens)
+        samples = [s for b in baskets for s in b.samples]
 
-        # TODO not working in both multi head or not (add l[0] when only 1 head)
-        logits = [l for l in logits]
-        for l in logits:
-            print(l.shape)
-        #logits = [logits[0]]
         ids = [s.id.split("-") for s in samples]
         passage_start_t = [s.features[0]["passage_start_t"] for s in samples]
         seq_2_start_t = [s.features[0]["seq_2_start_t"] for s in samples]
 
         # Prepare tensors
-        logits = torch.stack(logits)
+        if len(logits) > 1:
+            logits = torch.stack(logits)
         padding_mask = torch.tensor([s.features[0]["padding_mask"] for s in samples], dtype=torch.long)
         start_of_word = torch.tensor([s.features[0]["start_of_word"] for s in samples], dtype=torch.long)
 

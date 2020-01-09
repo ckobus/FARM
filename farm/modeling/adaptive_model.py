@@ -192,12 +192,9 @@ class AdaptiveModel(nn.Module):
         for head, logits_for_head in zip(
             self.prediction_heads, logits
         ):
-            print("head")
-            print(head)
             preds = head.formatted_preds(
                 logits=logits_for_head, **kwargs
             )
-            print(preds)
             all_preds.append(preds)
         return all_preds
 

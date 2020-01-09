@@ -147,11 +147,8 @@ class Inferencer:
         :param max_processes: the maximum size of `multiprocessing.Pool`. Set to value of 1 to disable multiprocessing.
         :type max_processes: int
         """
-        print("ENTERING inference_from_file")
         dicts = self.processor.file_to_dicts(file)
-        print(dicts)
-        # TODO LEA not working when rest_api_>schema=True
-        preds_all = self.inference_from_dicts(dicts, rest_api_schema=False, max_processes=max_processes)
+        preds_all = self.inference_from_dicts(dicts, max_processes=max_processes)
         return preds_all
 
     def inference_from_dicts(self, dicts, rest_api_schema=False, max_processes=128):
@@ -221,7 +218,13 @@ class Inferencer:
         )
         logits_all = []
         preds_all = []
-        aggregate_preds = hasattr(self.model.prediction_heads[0], "aggregate_preds")
+        
+        aggregate_preds = False
+        for h in self.model.prediction_heads:
+            if hasattr(h, "aggregate_preds"):
+                aggregate_preds = True
+                break
+
         for i, batch in enumerate(tqdm(data_loader, desc=f"Inferencing")):
             batch = {key: batch[key].to(self.device) for key in batch}
             if not aggregate_preds:
@@ -239,14 +242,14 @@ class Inferencer:
                         **batch)
                     preds_all += preds
                 else:
-                    logits_all += [l for l in logits]
+                    logits_all += logits
         if aggregate_preds:
             # can assume that we have only complete docs i.e. all the samples of one doc are in the current chunk
             # TODO is there a better way than having to wrap logits all in list?
             # TODO can QA formatted preds deal with samples?
-            preds_all = self.model.formatted_preds(logits=[logits_all],
+            preds_all = self.model.formatted_preds(logits=logits_all,
                                                    baskets=baskets,
-                                                   rest_api_schema=rest_api_schema)[0]
+                                                   rest_api_schema=rest_api_schema)
         return preds_all
 
     def extract_vectors(

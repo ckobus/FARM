@@ -1,5 +1,6 @@
 import json
 import re
+import pprint
 
 from farm.infer import Inferencer
 from farm.train import Trainer
@@ -136,26 +137,19 @@ if train:
 
 if inference:
   model = Inferencer.load(save_dir, batch_size=32, gpu=False)
-  full_result = model.inference_from_file(
+  result = model.inference_from_file(
     file=inference_file
     #max_processes=8,
   )
-  print("FULL_RESULT")
-  print(full_result)
+
+  for x in result:
+    pprint.pprint(x)
+
   #write_squadbis_predictions(
   #  task_predictions=full_result,
   #  predictions_filename=full_predictions_file,
   #  out_filename="predictions.json"
   #)
-
-  for r in full_result:
-    print(r)
-  result = {r[1]["id"]: r[1]["preds"][0][0] for r in full_result }
-
-  json.dump(result,
-            open(predictions_file, "w"),
-            indent=2,
-            ensure_ascii=False)
 
 #  for x in full_result:
 #    print(x)

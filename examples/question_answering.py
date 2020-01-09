@@ -35,26 +35,27 @@ evaluate_every = 500
 base_LM_model = "bert-base-cased"
 train_filename="train-v2.0.json"
 dev_filename="dev-v2.0.json"
+train = False
 
-if False:
-    # 1.Create a tokenizer
-    tokenizer = Tokenizer.load(
-        pretrained_model_name_or_path=base_LM_model, do_lower_case=False
-    )
-    # 2. Create a DataProcessor that handles all the conversion from raw text into a pytorch Dataset
-    label_list = ["start_token", "end_token"]
-    metric = "squad"
-    processor = SquadProcessor(
-        tokenizer=tokenizer,
-        max_seq_len=256,
-        label_list=label_list,
-        metric=metric,
-        train_filename=train_filename,
-        dev_filename=dev_filename,
-        test_filename=None,
-        data_dir="../data/squad20",
-    )
+# 1.Create a tokenizer
+tokenizer = Tokenizer.load(
+    pretrained_model_name_or_path=base_LM_model, do_lower_case=False
+)
+# 2. Create a DataProcessor that handles all the conversion from raw text into a pytorch Dataset
+label_list = ["start_token", "end_token"]
+metric = "squad"
+processor = SquadProcessor(
+    tokenizer=tokenizer,
+    max_seq_len=256,
+    label_list=label_list,
+    metric=metric,
+    train_filename=train_filename,
+    dev_filename=dev_filename,
+    test_filename=None,
+    data_dir="../data/squad20",
+)
 
+if train:
 
     # 3. Create a DataSilo that loads several datasets (train/dev/test), provides DataLoaders for them and calculates a few descriptive statistics of our datasets
     data_silo = DataSilo(processor=processor, batch_size=batch_size, distributed=False)
@@ -131,21 +132,22 @@ QA_input = [
                     "context": "The Normans (Norman: Nourmands; French: Normands; Latin: Normanni) were the people who in the 10th and 11th centuries gave their name to Normandy, a region in France. They were descended from Norse (\"Norman\" comes from \"Norseman\") raiders and pirates from Denmark, Iceland and Norway who, under their leader Rollo, agreed to swear fealty to King Charles III of West Francia. Through generations of assimilation and mixing with the native Frankish and Roman-Gaulish populations, their descendants would gradually merge with the Carolingian-based cultures of West Francia. The distinct cultural and ethnic identity of the Normans emerged initially in the first half of the 10th century, and it continued to evolve over the succeeding centuries."
 
         }]
-save_dir = "/Users/kobus_c/Downloads/bert-english-qa-large"
+save_dir = "/Users/lancelot_f/Downloads/bert-english-qa-large"
 model = Inferencer.load(save_dir, batch_size=40, gpu=True)
 result = model.inference_from_dicts(dicts=QA_input)
 
 for x in result:
-    pprint.pprint(x)
+  pprint.pprint(x)
 
 # 10. Do Inference on whole SQuAD Dataset & write the predictions file to disk
-filename = os.path.join(processor.data_dir,processor.dev_filename)
-result = model.inference_from_file(file=filename)
+if False:
+  filename = os.path.join(processor.data_dir,processor.dev_filename)
+  result = model.inference_from_file(file=filename)
 
-write_squad_predictions(
-    predictions=result,
-    predictions_filename=filename,
-    out_filename="predictions.json"
-)
+  write_squad_predictions(
+      predictions=result,
+      predictions_filename=filename,
+      out_filename="predictions.json"
+  )
 
 
