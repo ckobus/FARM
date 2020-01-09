@@ -287,7 +287,7 @@ class TextClassificationHead(PredictionHead):
     def formatted_preds(self, logits, samples, return_class_probs=False, **kwargs):
         preds = self.logits_to_preds(logits)
         probs = self.logits_to_probs(logits, return_class_probs)
-        contexts = [sample.clear_text["text"] for sample in samples]
+        contexts = [sample.clear_text["passage_text"] for sample in samples]
 
         assert len(preds) == len(probs) == len(contexts)
 
@@ -941,7 +941,7 @@ class QuestionAnsweringHead(PredictionHead):
             return False
         return True
 
-    def formatted_preds(self, logits, baskets, rest_api_schema=False):
+    def formatted_preds(self, logits, baskets=None, samples=None, rest_api_schema=False, **kwargs):
         """ Takes a list of logits, each corresponding to one sample, and converts them into document level predictions.
         Leverages information in the SampleBaskets. Assumes that we are being passed logits from ALL samples in the one
         SampleBasket i.e. all passages of a document. """
@@ -950,7 +950,12 @@ class QuestionAnsweringHead(PredictionHead):
         # passage_start_t is the token index of the passage relative to the document (usually a multiple of doc_stride)
         # seq_2_start_t is the token index of the first token in passage relative to the input sequence (i.e. number of
         # special tokens and question tokens that come before the passage tokens)
-        samples = [s for b in baskets for s in b.samples]
+
+        # TODO not working in both multi head or not (add l[0] when only 1 head)
+        logits = [l for l in logits]
+        for l in logits:
+            print(l.shape)
+        #logits = [logits[0]]
         ids = [s.id.split("-") for s in samples]
         passage_start_t = [s.features[0]["passage_start_t"] for s in samples]
         seq_2_start_t = [s.features[0]["seq_2_start_t"] for s in samples]
@@ -968,7 +973,7 @@ class QuestionAnsweringHead(PredictionHead):
         # i.e. that there are no incomplete documents. The output of this step
         # are prediction spans
         preds_d = self.aggregate_preds(preds_p, passage_start_t, ids, seq_2_start_t)
-        assert len(preds_d) == len(baskets)
+        #assert len(preds_d) == len(baskets)
 
         # Separate top_preds list from the no_ans_gap float
         top_preds, no_ans_gaps = zip(*preds_d)

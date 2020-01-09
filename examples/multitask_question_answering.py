@@ -12,6 +12,7 @@ from farm.modeling.prediction_head import TextClassificationHead
 from farm.modeling.language_model import LanguageModel
 from farm.modeling.tokenization import Tokenizer
 from farm.utils import set_all_seeds, MLFlowLogger, initialize_device_settings
+from farm.data_handler.utils import write_squadbis_predictions
 
 set_all_seeds(seed=42)
 device, n_gpu = initialize_device_settings(use_cuda=True)
@@ -24,8 +25,8 @@ base_LM_model = "bert-base-cased"
 #base_LM_model = "bert-large-uncased-whole-word-masking"
 train_filename = "train-v2.0.json"
 #train_filename = "dev-v2.0.json"
-dev_filename = "dev-v2.0.json"
-#dev_filename = "test"
+#dev_filename = "../data/squad20/dev-v2.0.json"
+dev_filename = "../data/squad20/test"
 grad_acc_steps=1
 evaluate_every = 5000
 max_seq_len = 384
@@ -36,7 +37,7 @@ save_dir = "./MultiTask_QA_Classification_" + str(base_LM_model) + "_max_seq_len
 print(save_dir)
 
 inference = True
-train = True
+train = False
 
 #variables for inference
 predictions_file = save_dir + "/predictions.json"
@@ -134,24 +135,40 @@ if train:
   processor.save(save_dir)
 
 if inference:
-  model = Inferencer.load(save_dir, batch_size=32, gpu=True)
+  model = Inferencer.load(save_dir, batch_size=32, gpu=False)
   full_result = model.inference_from_file(
-    file=inference_file,
-    max_processes=max_processes_for_inference,
+    file=inference_file
+    #max_processes=8,
   )
+  print("FULL_RESULT")
+  print(full_result)
+  #write_squadbis_predictions(
+  #  task_predictions=full_result,
+  #  predictions_filename=full_predictions_file,
+  #  out_filename="predictions.json"
+  #)
 
-  for x in full_result:
-    print(x)
-    print()
-
-  result = {r["id"]: r["preds"][0][0] for r in full_result}
-  full_result =  {r["id"]: r["preds"] for r in full_result}
+  for r in full_result:
+    print(r)
+  result = {r[1]["id"]: r[1]["preds"][0][0] for r in full_result }
 
   json.dump(result,
             open(predictions_file, "w"),
-            indent=4,
+            indent=2,
             ensure_ascii=False)
-  json.dump(full_result,
-            open(full_predictions_file, "w"),
-            indent=4,
-            ensure_ascii=False)
+
+#  for x in full_result:
+#    print(x)
+#    print()
+
+#  result = {r["id"]: r["preds"][0][0] for r in full_result}
+#  full_result =  {r["id"]: r["preds"] for r in full_result}
+
+#  json.dump(result,
+#            open(predictions_file, "w"),
+#            indent=4,
+#            ensure_ascii=False)
+#  json.dump(full_result,
+#            open(full_predictions_file, "w"),
+##            indent=4,
+#            ensure_ascii=False)

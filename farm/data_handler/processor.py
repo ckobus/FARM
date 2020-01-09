@@ -188,7 +188,7 @@ class Processor(ABC):
         processor = cls.load(tokenizer=tokenizer, processor_name=config["processor"], **config)
 
         for task_name, task in config["tasks"].items():
-            processor.add_task(name=task_name, metric=task["metric"], label_list=task["label_list"])
+            processor.add_task(name=task_name, metric=task["metric"], label_list=task["label_list"], task_type=task["task_type"])
 
         if processor is None:
             raise Exception
@@ -1170,14 +1170,14 @@ class SquadbisProcessor(Processor):
             proxies=proxies
         )
 
-        if len(metric) == len(label_list):
+        if metric and label_list:
             self.add_task("text_classification", metric[0], label_list[0], task_type="classification")
             self.add_task("question_answering", metric[1], label_list[1], task_type="question_answering")
         else:
             logger.info("Initialized processor without tasks. Supply `metric` and `label_list` to the constructor for "
                         "using the default task or add a custom task later via processor.add_task()")
 
-    def dataset_from_dicts(self, dicts, indices=None, rest_api_schema=False, return_baskets=False):
+    def dataset_from_dicts(self, dicts, indices=None, rest_api_schema=False, return_baskets=True):
         """ Overwrites the method from the base class since Question Answering processing is quite different.
         This method allows for documents and questions to be tokenized earlier. Then SampleBaskets are initialized
         with one document and one question. """
@@ -1245,6 +1245,7 @@ class SquadbisProcessor(Processor):
 
     def _convert_rest_api_dict(self, infer_dict):
         # convert input coming from inferencer to SQuAD format
+        print(infer_dict)
         if len(infer_dict.get("questions")) > 1:
             raise ValueError("Inferencer currently does not support answering multiple questions on a text."
                                 "As a workaround, multiple input dicts with text and question pairs can be "

@@ -74,6 +74,8 @@ class Inferencer:
         self.batch_size = batch_size
         self.device = device
         self.language = self.model.language_model.language
+
+        self.prediction_type = None
         # TODO adjust for multiple prediction heads
         if len(self.model.prediction_heads) == 1:
             self.prediction_type = self.model.prediction_heads[0].model_type
@@ -145,7 +147,10 @@ class Inferencer:
         :param max_processes: the maximum size of `multiprocessing.Pool`. Set to value of 1 to disable multiprocessing.
         :type max_processes: int
         """
+        print("ENTERING inference_from_file")
         dicts = self.processor.file_to_dicts(file)
+        print(dicts)
+        # TODO LEA not working when rest_api_>schema=True
         preds_all = self.inference_from_dicts(dicts, rest_api_schema=False, max_processes=max_processes)
         return preds_all
 
@@ -222,11 +227,12 @@ class Inferencer:
             if not aggregate_preds:
                 batch_samples = samples[i * self.batch_size : (i + 1) * self.batch_size]
             with torch.no_grad():
-                logits = self.model.forward(**batch)[0]
+                logits = self.model.forward(**batch)
                 if not aggregate_preds:
                     preds = self.model.formatted_preds(
-                        logits=[logits],
+                        logits=logits,
                         samples=batch_samples,
+                        baskets=baskets,
                         tokenizer=self.processor.tokenizer,
                         return_class_probs=self.return_class_probs,
                         rest_api_schema=rest_api_schema,
