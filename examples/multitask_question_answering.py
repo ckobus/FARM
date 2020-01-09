@@ -34,7 +34,7 @@ max_seq_len = 384
 #max_seq_len = 256
 learning_rate = 3e-5
 warmup_proportion = 0.1
-save_dir = "./MultiTask_QA_Classification_" + str(base_LM_model) + "_max_seq_len_" + str(max_seq_len) + "_grad_acc_steps_" + str(grad_acc_steps)
+save_dir = "../data/MultiTask_QA_Classification_" + str(base_LM_model) + "_max_seq_len_" + str(max_seq_len) + "_grad_acc_steps_" + str(grad_acc_steps)
 print(save_dir)
 
 inference = True
