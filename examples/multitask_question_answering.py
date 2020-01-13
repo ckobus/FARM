@@ -13,7 +13,7 @@ from farm.modeling.prediction_head import TextClassificationHead
 from farm.modeling.language_model import LanguageModel
 from farm.modeling.tokenization import Tokenizer
 from farm.utils import set_all_seeds, MLFlowLogger, initialize_device_settings
-from farm.data_handler.utils import write_squadbis_predictions
+from farm.data_handler.utils import write_squad_predictions
 
 set_all_seeds(seed=42)
 device, n_gpu = initialize_device_settings(use_cuda=True)
@@ -145,11 +145,10 @@ if inference:
   for x in result:
     pprint.pprint(x)
 
-  #write_squadbis_predictions(
-  #  task_predictions=full_result,
-  #  predictions_filename=full_predictions_file,
-  #  out_filename="predictions.json"
-  #)
+  write_squad_predictions(
+    predictions=result,
+    out_filename="predictions.json"
+  )
 
 #  for x in full_result:
 #    print(x)

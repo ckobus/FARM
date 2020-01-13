@@ -228,6 +228,7 @@ class TextClassificationHead(PredictionHead):
         loss_ignore_index=-100,
         loss_reduction="none",
         task_name="text_classification",
+        context_window_size=100, n_best=5,
         **kwargs,
     ):
         super(TextClassificationHead, self).__init__()
@@ -239,6 +240,8 @@ class TextClassificationHead(PredictionHead):
         self.model_type = "text_classification"
         self.task_name = task_name #used for connecting with the right output of the processor
         self.class_weights = class_weights
+        self.context_window_size = context_window_size
+        self.n_best = n_best
 
         if class_weights:
             logger.info(f"Using class weights for task '{self.task_name}': {self.class_weights}")
@@ -285,40 +288,154 @@ class TextClassificationHead(PredictionHead):
         return labels
 
     def formatted_preds(self, logits, samples=None, baskets=None, return_class_probs=False, **kwargs):
-        preds = self.logits_to_preds(logits)
+        preds_p = self.logits_to_preds(logits)
         probs = self.logits_to_probs(logits, return_class_probs)
 
         if baskets:
             samples = [s for b in baskets for s in b.samples]
 
-        # ids = [s.id.split("-") for s in samples]
-        contexts = [sample.clear_text["passage_text"] for sample in samples]
+        ids = [s.id.split("-") for s in samples]
+        passage_start_t = [s.features[0]["passage_start_t"] for s in samples]
+        seq_2_start_t = [s.features[0]["seq_2_start_t"] for s in samples]
 
-        assert len(preds) == len(probs) == len(contexts)
+        # assert len(preds) == len(probs) == len(contexts)
+        preds_d = self.aggregate_preds(list(zip(preds_p, probs)), passage_start_t, ids, seq_2_start_t)
 
-        res = {"task": "text_classification", "predictions": []}
-        for pred, prob, context in zip(preds, probs, contexts):
-            if not return_class_probs:
-                pred_dict = {
-                    "start": None,
-                    "end": None,
-                    "context": f"{context}",
-                    "label": f"{pred}",
-                    "probability": prob,
-                }
-            else:
-                pred_dict = {
-                    "start": None,
-                    "end": None,
-                    "context": f"{context}",
-                    "label": "class_probabilities",
-                    "probability": prob,
-                }
+        # Takes document level prediction spans and returns string predictions
+        formatted = self.stringify(preds_d, baskets)
 
-            res["predictions"].append(pred_dict)
+        res = {"task": "text_classification", "predictions": formatted}
         return res
 
+    def stringify(self, top_preds, baskets):
+        """ Turn prediction spans into strings """
+        ret = []
 
+        # Iterate over each set of document level prediction
+        for pred_d, basket in zip(top_preds, baskets):
+            curr_dict = {}
+            # Unpack document offsets, clear text and squad_id
+            token_offsets = basket.raw["document_offsets"]
+            clear_text = basket.raw["document_text"]
+            squad_id = basket.raw["squad_id"]
+
+            # Iterate over each prediction on the one document
+            full_preds = []
+            for label_t, score in pred_d:
+                full_preds.append({
+                    "label": label_t,
+                    "probability": score
+                })
+            curr_dict["id"] = squad_id
+            curr_dict["preds"] = full_preds
+            # curr_dict["clear_text"] = clear_text
+            ret.append(curr_dict)
+        return ret
+
+    @staticmethod
+    def span_to_string(start_t, end_t, token_offsets, clear_text):
+
+        # If it is a no_answer prediction
+        if start_t == -1 and end_t == -1:
+            return "", 0, 0
+
+        n_tokens = len(token_offsets)
+
+        # We do this to point to the beginning of the first token after the span instead of
+        # the beginning of the last token in the span
+        end_t += 1
+
+        # Predictions sometimes land on the very final special token of the passage. But there are no
+        # special tokens on the document level. We will just interpret this as a span that stretches
+        # to the end of the document
+        end_t = min(end_t, n_tokens)
+
+        start_ch = token_offsets[start_t]
+        # i.e. pointing at the END of the last token
+        if end_t == n_tokens:
+            end_ch = len(clear_text)
+        else:
+            end_ch = token_offsets[end_t]
+        return clear_text[start_ch: end_ch].strip(), start_ch, end_ch
+
+    def aggregate_preds(self, preds, passage_start_t, ids, seq_2_start_t=None, labels=None):
+        """ Aggregate passage level predictions to create document level predictions.
+        This method assumes that all passages of each document are contained in preds
+        i.e. that there are no incomplete documents. The output of this step
+        are prediction spans. No answer is represented by a (-1, -1) span on the document level """
+
+        # Initialize some variables
+        n_samples = len(preds)
+        all_basket_preds = {}
+        all_basket_labels = {}
+
+        # Iterate over the preds of each sample
+        for sample_idx in range(n_samples):
+            id_1, id_2, _ = ids[sample_idx]
+            basket_id = f"{id_1}-{id_2}"
+
+            # curr_passage_start_t is the token offset of the current passage
+            # It will always be a multiple of doc_stride
+            curr_passage_start_t = passage_start_t[sample_idx]
+
+            # This is to account for the fact that all model input sequences start with some special tokens
+            # and also the question tokens before passage tokens.
+            if seq_2_start_t:
+                cur_seq_2_start_t = seq_2_start_t[sample_idx]
+                curr_passage_start_t -= cur_seq_2_start_t
+
+            # Converts the passage level predictions+labels to document level predictions+labels. Note
+            # that on the passage level a no answer is (0,0) but at document level it is (-1,-1) since (0,0)
+            # would refer to the first token of the document
+            pred_d = self.pred_to_doc_idxs(preds[sample_idx], curr_passage_start_t)
+            if labels:
+                label_d = self.label_to_doc_idxs(labels[sample_idx], curr_passage_start_t)
+
+            # Initialize the basket_id as a key in the all_basket_preds and all_basket_labels dictionaries
+            if basket_id not in all_basket_preds:
+                all_basket_preds[basket_id] = []
+                all_basket_labels[basket_id] = []
+
+            # Add predictions and labels to dictionary grouped by their basket_ids
+            all_basket_preds[basket_id].append(pred_d)
+            if labels:
+                all_basket_labels[basket_id].append(label_d)
+
+        # Pick n-best predictions and remove repeated labels
+        all_basket_preds = {k: self.reduce_preds(v) for k, v in all_basket_preds.items()}
+        if labels:
+            all_basket_labels = {k: self.reduce_labels(v) for k, v in all_basket_labels.items()}
+
+        # Return aggregated predictions in order as a list of lists
+        keys = [k for k in all_basket_preds]
+        aggregated_preds = [all_basket_preds[k] for k in keys]
+        if labels:
+            labels = [all_basket_labels[k] for k in keys]
+            return aggregated_preds, labels
+        else:
+            return aggregated_preds
+
+    @staticmethod
+    def pred_to_doc_idxs(pred, passage_start_t):
+        """ Converts the passage level predictions to document level predictions. Note that on the doc level we
+        don't have special tokens or question tokens. This means that a no answer
+        cannot be prepresented by a (0,0) span but will instead be represented by (-1, -1)"""
+        return pred
+
+    def reduce_preds(self, preds):
+        """ This function contains the logic for choosing the best answers from each passage. In the end, it
+        returns the n_best predictions on the document level. """
+
+        # Initialize some variables
+        document_label = True
+        passage_labels = []
+        passage_scores = []
+
+        document_labels_sorted = sorted(preds, key=lambda x: x[1], reverse=True)
+        document_labels_reduced = document_labels_sorted[:self.n_best]
+
+        return document_labels_reduced
+        
 class MultiLabelTextClassificationHead(PredictionHead):
     def __init__(
         self,
@@ -1009,7 +1126,7 @@ class QuestionAnsweringHead(PredictionHead):
             curr_dict["id"] = squad_id
             curr_dict["preds"] = full_preds
             ret.append(curr_dict)
-        return ret
+        return {"task": "qa", "predictions": ret}
 
 
     def to_rest_api_schema(self, formatted_preds, no_ans_gaps, baskets):

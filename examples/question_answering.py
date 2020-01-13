@@ -112,6 +112,11 @@ result = model.inference_from_file(
 for x in result:
   pprint.pprint(x)
 
+write_squad_predictions(
+    predictions=result,
+    out_filename="predictions_qalarge.json"
+)
+  
 # 10. Do Inference on whole SQuAD Dataset & write the predictions file to disk
 if False:
   filename = os.path.join(processor.data_dir,processor.dev_filename)
@@ -120,7 +125,7 @@ if False:
   write_squad_predictions(
       predictions=result,
       predictions_filename=filename,
-      out_filename="predictions.json"
+      out_filename="predictions_qalarge.json"
   )
 
 

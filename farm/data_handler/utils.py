@@ -106,49 +106,19 @@ def read_squad_file(filename, proxies=None):
     return input_data
 
 def write_squad_predictions(predictions, out_filename, predictions_filename=None):
-    print("ENTERING WRITE")
     predictions_json = {}
-    for p in predictions:
-        for x in p["predictions"]:
-            print(x)
-            predictions_json[x["question_id"]] = x["answers"][0]["answer"]
 
-    if predictions_filename:
-        dev_labels = {}
-        temp = json.load(open(predictions_filename, "r"))
-        for d in temp["data"]:
-            for p in d["paragraphs"]:
-                for q in p["qas"]:
-                    if q["is_impossible"]:
-                        dev_labels[q["id"]] = "is_impossible"
-                    else:
-                        dev_labels[q["id"]] = q["answers"][0]["text"]
-        not_included = set(list(dev_labels.keys())) - set(list(predictions_json.keys()))
-        if len(not_included) > 0:
-            logger.info(f"There were missing predicitons for question ids: {str(set(list(dev_labels.keys())))}")
-        for x in not_included:
-            predictions_json[x] = ""
-
-    os.makedirs("model_output", exist_ok=True)
-    filepath = os.path.join("model_output",out_filename)
-    json.dump(predictions_json, open(filepath, "w"))
-    logger.info(f"Written Squad predictions to: {filepath}")
-
-def write_squadbis_predictions(task_predictions, out_filename, predictions_filename=None):
-    print("ENTERING WRITE")
-    print(task_predictions)
-    predictions_json = {}
-    for tp in task_predictions:
-        print("TP")
-        print(tp)
-        print("TYPE")
-        print(type(tp))
-        print(tp['task'])
-        if tp['task'] == "qa":
+    for tp in predictions:
+        if tp['task'] == "text_classification":
             for x in tp["predictions"]:
-                print(x)
-                predictions_json[x["question_id"]] = x["answers"][0]["answer"]
-
+                if x["preds"][0]["label"] == "NONE":
+                    predictions_json[x["id"]] = ""
+    for tp in predictions:
+        if tp['task'] != "text_classification":
+            for x in tp["predictions"]:
+                if x["id"] not in predictions_json:
+                    predictions_json[x["id"]] = x["preds"][0][0]
+                    
     if predictions_filename:
         dev_labels = {}
         temp = json.load(open(predictions_filename, "r"))
