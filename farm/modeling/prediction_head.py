@@ -291,6 +291,7 @@ class TextClassificationHead(PredictionHead):
         if baskets:
             samples = [s for b in baskets for s in b.samples]
 
+        # ids = [s.id.split("-") for s in samples]
         contexts = [sample.clear_text["passage_text"] for sample in samples]
 
         assert len(preds) == len(probs) == len(contexts)
@@ -961,8 +962,9 @@ class QuestionAnsweringHead(PredictionHead):
         seq_2_start_t = [s.features[0]["seq_2_start_t"] for s in samples]
 
         # Prepare tensors
-        if len(logits) > 1:
-            logits = torch.stack(logits)
+        if type(logits) == torch.Tensor:
+            logits = tuple(logits)
+        logits = torch.stack(logits)
         padding_mask = torch.tensor([s.features[0]["padding_mask"] for s in samples], dtype=torch.long)
         start_of_word = torch.tensor([s.features[0]["start_of_word"] for s in samples], dtype=torch.long)
 

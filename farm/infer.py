@@ -216,7 +216,7 @@ class Inferencer:
         data_loader = NamedDataLoader(
             dataset=dataset, sampler=SequentialSampler(dataset), batch_size=self.batch_size, tensor_names=tensor_names
         )
-        logits_all = []
+        logits_all = [None for i in range(len(self.model.prediction_heads))]
         preds_all = []
         
         aggregate_preds = False
@@ -242,7 +242,12 @@ class Inferencer:
                         **batch)
                     preds_all += preds
                 else:
-                    logits_all += logits
+                    for il, l in enumerate(logits):
+                        if logits_all[il] is not None:
+                            logits_all[il] = torch.cat([logits_all[il], l])
+                        else:
+                            logits_all[il] = l
+                        # logits_all[il].append(l)
         if aggregate_preds:
             # can assume that we have only complete docs i.e. all the samples of one doc are in the current chunk
             # TODO is there a better way than having to wrap logits all in list?
