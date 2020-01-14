@@ -1177,7 +1177,7 @@ class SquadbisProcessor(Processor):
             logger.info("Initialized processor without tasks. Supply `metric` and `label_list` to the constructor for "
                         "using the default task or add a custom task later via processor.add_task()")
 
-    def dataset_from_dicts(self, dicts, indices=None, rest_api_schema=False, return_baskets=True):
+    def dataset_from_dicts(self, dicts, indices=None, rest_api_schema=False, return_baskets=False):
         """ Overwrites the method from the base class since Question Answering processing is quite different.
         This method allows for documents and questions to be tokenized earlier. Then SampleBaskets are initialized
         with one document and one question. """
