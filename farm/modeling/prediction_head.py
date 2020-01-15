@@ -422,6 +422,18 @@ class TextClassificationHead(PredictionHead):
         cannot be prepresented by a (0,0) span but will instead be represented by (-1, -1)"""
         return pred
 
+    @staticmethod
+    def label_to_doc_idxs(label, passage_start_t):
+        """ Converts the passage level labels to document level labels. Note that on the doc level we
+        don't have special tokens or question tokens. This means that a no answer
+        cannot be prepresented by a (0,0) span but will instead be represented by (-1, -1)"""
+        return label
+
+    @staticmethod
+    def reduce_labels(labels):
+        """ Removes repeat answers. Represents a no answer label as (-1,-1)"""
+        return list(set(labels))
+
     def reduce_preds(self, preds):
         """ This function contains the logic for choosing the best answers from each passage. In the end, it
         returns the n_best predictions on the document level. """

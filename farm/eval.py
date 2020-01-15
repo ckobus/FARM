@@ -77,12 +77,17 @@ class Evaluator:
                 loss_all[head_num] += np.sum(to_numpy(losses_per_head[head_num]))
                 preds_all[head_num] += list(to_numpy(preds[head_num]))
                 label_all[head_num] += list(to_numpy(labels[head_num]))
-                if head.model_type == "span_classification":
+                if head.model_type == "span_classification" or head.model_type == "text_classification" :
                     ids_all[head_num] += list(to_numpy(batch["id"]))
                     passage_start_t_all[head_num] += list(to_numpy(batch["passage_start_t"]))
 
         # Evaluate per prediction head
         all_results = []
+        aggregate_preds = False
+        for h in model.prediction_heads:
+            if hasattr(h, "aggregate_preds"):
+                aggregate_preds = True
+                break
         for head_num, head in enumerate(model.prediction_heads):
             if head.model_type == "multilabel_text_classification":
                 # converting from string preds back to multi-hot encoding
@@ -91,7 +96,7 @@ class Evaluator:
                 # TODO check why .fit() should be called on predictions, rather than on labels
                 preds_all[head_num] = mlb.fit_transform(preds_all[head_num])
                 label_all[head_num] = mlb.transform(label_all[head_num])
-            if hasattr(head, 'aggregate_preds'):
+            if aggregate_preds:
                 preds_all[head_num], label_all[head_num] = head.aggregate_preds(preds=preds_all[head_num],
                                                                           labels=label_all[head_num],
                                                                           passage_start_t=passage_start_t_all[head_num],
