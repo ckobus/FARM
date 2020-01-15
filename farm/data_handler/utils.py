@@ -140,6 +140,63 @@ def write_squad_predictions(predictions, out_filename, predictions_filename=None
     json.dump(predictions_json, open(filepath, "w"))
     logger.info(f"Written Squad predictions to: {filepath}")
 
+
+def write_nq_predictions(predictions, out_filename, predictions_filename=None):
+    predictions_json = {}
+
+    for tp in predictions:
+        task = tp['task']
+        if task == "text_classification":
+            for x in tp["predictions"]:
+                x_id = x['id']
+                predictions_json.setdefault(x_id, {'text_classification': [], 'qa': []})
+                for pred in x['preds'][0:2]:
+                    predictions_json[x_id][task].append({
+                        'label': pred['label'],
+                        'prob': pred['probability'].item()
+                    })
+        elif task == "qa":
+            for x in tp["predictions"]:
+                x_id = x['id']
+                predictions_json.setdefault(x_id, {'text_classification': [], 'qa': []})
+                for pred in x['preds'][0:3]:
+                    predictions_json[x_id][task].append({
+                        'span': pred[0],
+                        'score': pred[3]
+                    })
+    #for tp in predictions:
+    #    if tp['task'] == "text_classification":
+    #        for x in tp["predictions"]:
+    #            if x["preds"][0]["label"] == "no-answer":
+    #                predictions_json[x["id"]] = ""
+    #for tp in predictions:
+    #    if tp['task'] != "text_classification":
+    #        for x in tp["predictions"]:
+    #            if x["id"] not in predictions_json:
+    #                predictions_json[x["id"]] = x["preds"][0][0]
+                    
+    if predictions_filename:
+        dev_labels = {}
+        temp = json.load(open(predictions_filename, "r"))
+        for d in temp["data"]:
+            for p in d["paragraphs"]:
+                for q in p["qas"]:
+                    if q["is_impossible"]:
+                        dev_labels[q["id"]] = "is_impossible"
+                    else:
+                        dev_labels[q["id"]] = q["answers"][0]["text"]
+        not_included = set(list(dev_labels.keys())) - set(list(predictions_json.keys()))
+        if len(not_included) > 0:
+            logger.info(f"There were missing predicitons for question ids: {str(set(list(dev_labels.keys())))}")
+        for x in not_included:
+            predictions_json[x] = ""
+
+    os.makedirs("model_output", exist_ok=True)
+    filepath = os.path.join("model_output",out_filename)
+    json.dump(predictions_json, open(filepath, "w"))
+    logger.info(f"Written Squad predictions to: {filepath}")
+
+
 def _download_extract_downstream_data(input_file, proxies=None):
     # download archive to temp dir and extract to correct position
     full_path = os.path.realpath(input_file)

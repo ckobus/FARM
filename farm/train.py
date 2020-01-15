@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function
 
 import logging
 import torch
+import sys
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tqdm import tqdm
 
@@ -204,7 +205,7 @@ class Trainer:
         evalnr = 0
         loss = 0
         for epoch in range(1, self.epochs + 1):
-            progress_bar = tqdm(self.data_loader_train)
+            progress_bar = tqdm(self.data_loader_train, file=sys.stdout)
             for step, batch in enumerate(progress_bar):
                 progress_bar.set_description(f"Train epoch {epoch}/{self.epochs} (Cur. train loss: {loss:.4f})")
 
