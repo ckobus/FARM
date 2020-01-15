@@ -104,10 +104,10 @@ class Evaluator:
 
             result = {"loss": loss_all[head_num] / len(self.data_loader.dataset),
                       "task_name": head.task_name}
-            result.update(
-                compute_metrics(metric=head.metric, preds=preds_all[head_num], labels=label_all[head_num]
-                )
-            )
+            #result.update(
+            #    compute_metrics(metric=head.metric, preds=preds_all[head_num], labels=label_all[head_num]
+            #    )
+            #)
 
             # Select type of report depending on prediction head output type
             if self.report:
