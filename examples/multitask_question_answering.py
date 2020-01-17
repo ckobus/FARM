@@ -18,18 +18,19 @@ from farm.data_handler.utils import write_squad_predictions
 set_all_seeds(seed=42)
 device, n_gpu = initialize_device_settings(use_cuda=True)
 
-batch_size = 64
+batch_size = 4
 #batch_size = 16
 n_epochs = 2
 
-base_LM_model = "bert-base-cased"
+base_LM_model = "albert-base-v2"
+#base_LM_model = "bert-base-cased"
 #base_LM_model = "bert-large-uncased-whole-word-masking"
-train_filename = "train-v2.0.json"
-#train_filename = "dev-v2.0.json"
+#train_filename = "train-v2.0.json"
+train_filename = "dev-v2.0.json"
 #dev_filename = "../data/squad20/dev-v2.0.json"
-dev_filename = "../data/squad20/test.json"
+dev_filename = "test.json"
 grad_acc_steps=1
-evaluate_every = 5000
+evaluate_every = 4
 max_seq_len = 384
 #max_seq_len = 256
 learning_rate = 3e-5
@@ -38,7 +39,7 @@ save_dir = "../data/MultiTask_QA_Classification_" + str(base_LM_model) + "_max_s
 print(save_dir)
 
 inference = True
-train = False
+train = True
 
 #variables for inference
 predictions_file = save_dir + "/predictions.json"
@@ -48,13 +49,20 @@ inference_file = dev_filename
 if train:
   if re.match(r'.*base.*', base_LM_model):
     hidden_size=768
-  else:
+  elif re.match(r'xxlarge', base_LM_model):
+    hidden_size=4096
+  elif re.match(r'xlarge', base_LM_model):
+    hidden_size=2048
+  elif re.match(r'large', base_LM_model):
     hidden_size=1024
-
-  if re.match(r'.*cased.*', base_LM_model):
-    do_lower_case=False
-  else:
+    
+  if re.match(r'albert', base_LM_model):
     do_lower_case=True
+  else:
+    if re.match(r'.*uncased.*', base_LM_model):
+      do_lower_case=True
+    else:
+      do_lower_case=False
 
   # 1.Create a tokenizer
   tokenizer = Tokenizer.load(
