@@ -105,13 +105,13 @@ def read_squad_file(filename, proxies=None):
         input_data = json.load(reader)["data"]
     return input_data
 
-def write_squad_predictions(predictions, out_filename, predictions_filename=None):
+def write_squad_predictions(predictions, out_filename, predictions_filename=None, no_answer_label="NONE"):
     predictions_json = {}
 
     for tp in predictions:
         if tp['task'] == "text_classification":
             for x in tp["predictions"]:
-                if x["preds"][0]["label"] == "NONE":
+                if x["preds"][0]["label"] == no_answer_label:
                     predictions_json[x["id"]] = ""
     for tp in predictions:
         if tp['task'] != "text_classification":

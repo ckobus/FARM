@@ -1247,15 +1247,14 @@ class SquadbisProcessor(Processor):
 
     def _convert_rest_api_dict(self, infer_dict):
         # convert input coming from inferencer to SQuAD format
-        print(infer_dict)
-        if len(infer_dict.get("questions")) > 1:
+        if len(infer_dict.get("qas")) > 1:
             raise ValueError("Inferencer currently does not support answering multiple questions on a text."
                                 "As a workaround, multiple input dicts with text and question pairs can be "
                                 "supplied in a single API request.")
         converted = {
             "qas": [
                 {
-                    "question": infer_dict.get("questions", ["Missing?"])[0],
+                    "question": infer_dict.get("qa", ["Missing?"])[0],
                     "id": None,
                     "answers": [],
                     "is_impossible": False
@@ -1412,6 +1411,11 @@ class NQProcessor(Processor):
                 a = {"text": answer["text"],
                      "offset": answer["answer_start"]}
                 answers.append(a)
+
+            if "answer_type" not in question:
+                answer_type = 'no-answer'
+            else:
+                answer_type = question['answer_type']
             raw = {"document_text": document_text,
                    "document_tokens": document_tokenized["tokens"],
                    "document_offsets": document_tokenized["offsets"],
@@ -1421,7 +1425,7 @@ class NQProcessor(Processor):
                    "question_offsets": question_tokenized["offsets"],
                    "question_start_of_word": question_start_of_word,
                    "answers": answers,
-                   "answer_type": question["answer_type"],
+                   "answer_type": answer_type,
                    "squad_id": squad_id}
             raw_baskets.append(raw)
         return raw_baskets

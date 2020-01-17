@@ -144,7 +144,7 @@ def sample_to_features_squad_multitask(sample, tasks, tokenizer, max_seq_len, ma
     return [feature_dict]
 
 
-def sample_to_features_nq_multitask(sample, tasks, tokenizer, max_seq_len, max_answers=1):
+def sample_to_features_nq_multitask(sample, tasks, tokenizer, max_seq_len, max_answers=6):
     """ Prepares data for processing by the model. Supports cases where there are
     multiple answers for the one question/document pair."""
 
