@@ -106,13 +106,26 @@ def read_squad_file(filename, proxies=None):
         input_data = json.load(reader)["data"]
     return input_data
 
-def get_candidates(predictions, order=False):
+def get_candidates(predictions, order=False, label_model="squad"):
     candidates = []
     Candidate = namedtuple('Candidate', ['ans_type_num', 'ans_type', 'ans_type_prob', 'span_score', 'answer_score', 'span', 'context_string', 'id'])
-    type_orders = {
-        'NONE': 0,
-        'SPAN': 1
-    }
+    
+    no_answer_label = None
+    if label_model == "squad":
+        no_answer_label = 'NONE'
+        type_orders = {
+            'NONE': 0,
+            'SPAN': 1
+        }
+    elif label_model == "nq":
+        no_answer_label = 'no-answer'
+        type_orders = {
+            'no-answer': 0,
+            'long': 1,
+            'yes': 2,
+            'no': 2,
+            'short': 3
+        }
 
     multiple_head = len(predictions) > 1
     if multiple_head:
@@ -128,7 +141,7 @@ def get_candidates(predictions, order=False):
             span = pred_qa_0['answer']
             span_score = pred_qa_0['score']
             context_string = pred_qa_0['context']
-            answer_score = 0.0 if ans_type != 'SPAN' else ans_type_prob * span_score
+            answer_score = 0.0 if ans_type == no_answer_label else ans_type_prob * span_score
 
             c = Candidate(ans_type_num=type_orders[ans_type], ans_type=ans_type, ans_type_prob=ans_type_prob, span_score=span_score, answer_score=answer_score, span=span, context_string=context_string, id=id)
             candidates.append(c)
@@ -138,14 +151,14 @@ def get_candidates(predictions, order=False):
             p0 = p['predictions'][0]
             pred_qa_0 = p0['answers'][0]
             id = p0["question_id"]
-            ans_type = 'NONE'
+            ans_type = no_answer_label
             ans_type_prob =  1.0
             span = pred_qa_0['answer']
             span_score = pred_qa_0['score']
             context_string = pred_qa_0['context']
-            if span == '':
+            if span != '':
                 ans_type = 'SPAN'
-            answer_score = 0.0 if ans_type != 'SPAN' else ans_type_prob * span_score
+            answer_score = 0.0 if ans_type == no_answer_label else ans_type_prob * span_score
             c = Candidate(ans_type_num=type_orders[ans_type], ans_type=ans_type, ans_type_prob=ans_type_prob, span_score=span_score, answer_score=answer_score, span=span, context_string=context_string, id=id)
             candidates.append(c)
 
@@ -172,52 +185,12 @@ def write_squad_predictions(predictions, out_filename, predictions_filename=None
 def write_nq_predictions(predictions, out_filename, predictions_filename=None):
     predictions_json = {}
 
-    for tp in predictions:
-        task = tp['task']
-        if task == "text_classification":
-            for x in tp["predictions"]:
-                x_id = x['id']
-                predictions_json.setdefault(x_id, {'text_classification': [], 'qa': []})
-                for pred in x['preds'][0:2]:
-                    predictions_json[x_id][task].append({
-                        'label': pred['label'],
-                        'prob': pred['probability'].item()
-                    })
-        elif task == "qa":
-            for x in tp["predictions"]:
-                x_id = x['id']
-                predictions_json.setdefault(x_id, {'text_classification': [], 'qa': []})
-                for pred in x['preds'][0:3]:
-                    predictions_json[x_id][task].append({
-                        'span': pred[0],
-                        'score': pred[3]
-                    })
-    #for tp in predictions:
-    #    if tp['task'] == "text_classification":
-    #        for x in tp["predictions"]:
-    #            if x["preds"][0]["label"] == "no-answer":
-    #                predictions_json[x["id"]] = ""
-    #for tp in predictions:
-    #    if tp['task'] != "text_classification":
-    #        for x in tp["predictions"]:
-    #            if x["id"] not in predictions_json:
-    #                predictions_json[x["id"]] = x["preds"][0][0]
-                    
-    if predictions_filename:
-        dev_labels = {}
-        temp = json.load(open(predictions_filename, "r"))
-        for d in temp["data"]:
-            for p in d["paragraphs"]:
-                for q in p["qas"]:
-                    if q["is_impossible"]:
-                        dev_labels[q["id"]] = "is_impossible"
-                    else:
-                        dev_labels[q["id"]] = q["answers"][0]["text"]
-        not_included = set(list(dev_labels.keys())) - set(list(predictions_json.keys()))
-        if len(not_included) > 0:
-            logger.info(f"There were missing predictions for question ids: {str(set(list(dev_labels.keys())))}")
-        for x in not_included:
-            predictions_json[x] = ""
+    candidates = get_candidates(predictions, order=True, label_model='nq')
+    for c in candidates:
+        if c.ans_type == 'short':
+            predictions_json[c.id] = c.span
+        else:
+            predictions_json[c.id] = ''
 
     os.makedirs("model_output", exist_ok=True)
     filepath = os.path.join("model_output",out_filename)
