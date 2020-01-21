@@ -287,7 +287,7 @@ class TextClassificationHead(PredictionHead):
         labels = [self.label_list[int(x)] for x in label_ids]
         return labels
 
-    def formatted_preds(self, logits, samples=None, baskets=None, return_class_probs=False, **kwargs):
+    def formatted_preds(self, logits, samples=None, baskets=None, return_class_probs=False, rest_api_schema=False, **kwargs):
         preds_p = self.logits_to_preds(logits)
         probs = self.logits_to_probs(logits, return_class_probs)
 
@@ -304,8 +304,10 @@ class TextClassificationHead(PredictionHead):
         # Takes document level prediction spans and returns string predictions
         formatted = self.stringify(preds_d, baskets)
 
-        res = {"task": "text_classification", "predictions": formatted}
-        return res
+        if rest_api_schema:
+            formatted = self.to_rest_api_schema(formatted, baskets)
+
+        return formatted
 
     def stringify(self, top_preds, baskets):
         """ Turn prediction spans into strings """
@@ -330,6 +332,22 @@ class TextClassificationHead(PredictionHead):
             curr_dict["preds"] = full_preds
             # curr_dict["clear_text"] = clear_text
             ret.append(curr_dict)
+        return ret
+
+    def to_rest_api_schema(self, formatted_preds, baskets):
+        ret = []
+        ids = [fp["id"] for fp in formatted_preds]
+        preds = [fp["preds"] for fp in formatted_preds]
+
+        for preds, id, basket in zip(preds, ids, baskets):
+            curr = {
+                "task": "text_classification",
+                "predictions": [{
+                    "id": id,
+                    "answers": preds,
+                }]
+            }
+            ret.append(curr)
         return ret
 
     @staticmethod
@@ -1138,7 +1156,7 @@ class QuestionAnsweringHead(PredictionHead):
             curr_dict["id"] = squad_id
             curr_dict["preds"] = full_preds
             ret.append(curr_dict)
-        return {"task": "qa", "predictions": ret}
+        return ret
 
 
     def to_rest_api_schema(self, formatted_preds, no_ans_gaps, baskets):

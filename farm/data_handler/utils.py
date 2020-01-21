@@ -5,6 +5,7 @@ import random
 import tarfile
 import tempfile
 from itertools import islice
+from collections import namedtuple
 
 import pandas as pd
 from requests import get
@@ -105,35 +106,62 @@ def read_squad_file(filename, proxies=None):
         input_data = json.load(reader)["data"]
     return input_data
 
-def write_squad_predictions(predictions, out_filename, predictions_filename=None, no_answer_label="NONE"):
+def get_candidates(predictions, order=False):
+    candidates = []
+    Candidate = namedtuple('Candidate', ['ans_type_num', 'ans_type', 'ans_type_prob', 'span_score', 'answer_score', 'span', 'context_string', 'id'])
+    type_orders = {
+        'NONE': 0,
+        'SPAN': 1
+    }
+
+    multiple_head = len(predictions) > 1
+    if multiple_head:
+        TEXT_CL_IND = 0 # TEXT CLASS PREDICTION HEAD ORDER
+        QA_IND = 1 # QA PREDICTION HEAD ORDER
+        for i in range(len(predictions[0])):
+            pred_text_cl_0 = predictions[TEXT_CL_IND][i]['predictions'][0]['answers'][0]
+            pred_qa_0 = predictions[QA_IND][i]['predictions'][0]['answers'][0]
+            id = predictions[QA_IND][i]['predictions'][0]["question_id"]
+            ans_type = pred_text_cl_0['label']
+            ans_type_prob = pred_text_cl_0['probability'].item()
+
+            span = pred_qa_0['answer']
+            span_score = pred_qa_0['score']
+            context_string = pred_qa_0['context']
+            answer_score = 0.0 if ans_type != 'SPAN' else ans_type_prob * span_score
+
+            c = Candidate(ans_type_num=type_orders[ans_type], ans_type=ans_type, ans_type_prob=ans_type_prob, span_score=span_score, answer_score=answer_score, span=span, context_string=context_string, id=id)
+            candidates.append(c)
+    else:
+        preds = predictions[0]
+        for p in preds:
+            p0 = p['predictions'][0]
+            pred_qa_0 = p0['answers'][0]
+            id = p0["question_id"]
+            ans_type = 'NONE'
+            ans_type_prob =  1.0
+            span = pred_qa_0['answer']
+            span_score = pred_qa_0['score']
+            context_string = pred_qa_0['context']
+            if span == '':
+                ans_type = 'SPAN'
+            answer_score = 0.0 if ans_type != 'SPAN' else ans_type_prob * span_score
+            c = Candidate(ans_type_num=type_orders[ans_type], ans_type=ans_type, ans_type_prob=ans_type_prob, span_score=span_score, answer_score=answer_score, span=span, context_string=context_string, id=id)
+            candidates.append(c)
+
+    if order:
+        candidates = sorted(candidates, key=lambda x: (x[0], x[4]), reverse=True)
+    return candidates
+
+def write_squad_predictions(predictions, out_filename, predictions_filename=None):
     predictions_json = {}
 
-    for tp in predictions:
-        if tp['task'] == "text_classification":
-            for x in tp["predictions"]:
-                if x["preds"][0]["label"] == no_answer_label:
-                    predictions_json[x["id"]] = ""
-    for tp in predictions:
-        if tp['task'] != "text_classification":
-            for x in tp["predictions"]:
-                if x["id"] not in predictions_json:
-                    predictions_json[x["id"]] = x["preds"][0][0]
-                    
-    if predictions_filename:
-        dev_labels = {}
-        temp = json.load(open(predictions_filename, "r"))
-        for d in temp["data"]:
-            for p in d["paragraphs"]:
-                for q in p["qas"]:
-                    if q["is_impossible"]:
-                        dev_labels[q["id"]] = "is_impossible"
-                    else:
-                        dev_labels[q["id"]] = q["answers"][0]["text"]
-        not_included = set(list(dev_labels.keys())) - set(list(predictions_json.keys()))
-        if len(not_included) > 0:
-            logger.info(f"There were missing predicitons for question ids: {str(set(list(dev_labels.keys())))}")
-        for x in not_included:
-            predictions_json[x] = ""
+    candidates = get_candidates(predictions)
+    for c in candidates:
+        if c.ans_type == 'SPAN':
+            predictions_json[c.id] = c.span
+        else:
+            predictions_json[c.id] = ''
 
     os.makedirs("model_output", exist_ok=True)
     filepath = os.path.join("model_output",out_filename)
@@ -187,7 +215,7 @@ def write_nq_predictions(predictions, out_filename, predictions_filename=None):
                         dev_labels[q["id"]] = q["answers"][0]["text"]
         not_included = set(list(dev_labels.keys())) - set(list(predictions_json.keys()))
         if len(not_included) > 0:
-            logger.info(f"There were missing predicitons for question ids: {str(set(list(dev_labels.keys())))}")
+            logger.info(f"There were missing predictions for question ids: {str(set(list(dev_labels.keys())))}")
         for x in not_included:
             predictions_json[x] = ""
 

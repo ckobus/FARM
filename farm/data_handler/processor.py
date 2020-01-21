@@ -870,6 +870,8 @@ class SquadProcessor(Processor):
         with one document and one question. """
 
         if rest_api_schema:
+            dicts = [{"qas": [qa['question']], "text": x["context"], "id": qa['id']} for x in dicts for qa in x['qas']]
+            indices = [i for i, x in enumerate(dicts)]
             dicts = [self._convert_rest_api_dict(x) for x in dicts]
         self.baskets = self._dicts_to_baskets(dicts, indices)
         self._init_samples_in_baskets()
@@ -944,13 +946,13 @@ class SquadProcessor(Processor):
             "qas": [
                 {
                     "question": infer_dict.get("qas", ["Missing?"])[0],
-                    "id": None,
+                    "id": infer_dict.get("id", None),
                     "answers": [],
                     "is_impossible": False
                 }
             ],
             "context": infer_dict.get("text", "Missing!"),
-            "document_id": infer_dict.get("document_id", None),
+            "document_id": infer_dict.get("id", None),
         }
         return converted
 
@@ -1185,6 +1187,8 @@ class SquadbisProcessor(Processor):
         with one document and one question. """
 
         if rest_api_schema:
+            dicts = [{"qas": [qa['question']], "text": x["context"], "id": qa['id']} for x in dicts for qa in x['qas']]
+            indices = [i for i, x in enumerate(dicts)]
             dicts = [self._convert_rest_api_dict(x) for x in dicts]
         self.baskets = self._dicts_to_baskets(dicts, indices)
         self._init_samples_in_baskets()
@@ -1254,14 +1258,14 @@ class SquadbisProcessor(Processor):
         converted = {
             "qas": [
                 {
-                    "question": infer_dict.get("qa", ["Missing?"])[0],
-                    "id": None,
+                    "question": infer_dict.get("qas", ["Missing?"])[0],
+                    "id": infer_dict.get("id", None),
                     "answers": [],
                     "is_impossible": False
                 }
             ],
             "context": infer_dict.get("text", "Missing!"),
-            "document_id": infer_dict.get("document_id", None),
+            "document_id": infer_dict.get("id", None),
         }
         return converted
 
@@ -1365,6 +1369,8 @@ class NQProcessor(Processor):
         with one document and one question. """
 
         if rest_api_schema:
+            dicts = [{"qas": [qa['question']], "text": x["context"], "id": qa['id']} for x in dicts for qa in x['qas']]
+            indices = [i for i, x in enumerate(dicts)]
             dicts = [self._convert_rest_api_dict(x) for x in dicts]
         self.baskets = self._dicts_to_baskets(dicts, indices)
         self._init_samples_in_baskets()
@@ -1432,22 +1438,21 @@ class NQProcessor(Processor):
 
     def _convert_rest_api_dict(self, infer_dict):
         # convert input coming from inferencer to SQuAD format
-        print(infer_dict)
-        if len(infer_dict.get("questions")) > 1:
+        if len(infer_dict.get("qas")) > 1:
             raise ValueError("Inferencer currently does not support answering multiple questions on a text."
                                 "As a workaround, multiple input dicts with text and question pairs can be "
                                 "supplied in a single API request.")
         converted = {
             "qas": [
                 {
-                    "question": infer_dict.get("questions", ["Missing?"])[0],
-                    "id": None,
+                    "question": infer_dict.get("qas", ["Missing?"])[0],
+                    "id": infer_dict.get("id", None),
                     "answers": [],
                     "answer_type": "no-answer"
                 }
             ],
             "context": infer_dict.get("text", "Missing!"),
-            "document_id": infer_dict.get("document_id", None),
+            "document_id": infer_dict.get("id", None),
         }
         return converted
 

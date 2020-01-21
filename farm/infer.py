@@ -138,7 +138,7 @@ class Inferencer:
             return_class_probs=return_class_probs,
         )
 
-    def inference_from_file(self, file, max_processes=128):
+    def inference_from_file(self, file, rest_api_schema=False, max_processes=128):
         """
         Run downstream inference on the dicts in the file.
 
@@ -148,7 +148,7 @@ class Inferencer:
         :type max_processes: int
         """
         dicts = self.processor.file_to_dicts(file)
-        preds_all = self.inference_from_dicts(dicts, max_processes=max_processes)
+        preds_all = self.inference_from_dicts(dicts, rest_api_schema=rest_api_schema, max_processes=max_processes)
         return preds_all
 
     def inference_from_dicts(self, dicts, rest_api_schema=False, max_processes=128):

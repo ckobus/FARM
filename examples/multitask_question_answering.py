@@ -27,7 +27,7 @@ base_LM_model = "bert-base-cased"
 train_filename = "train-v2.0.json"
 #train_filename = "dev-v2.0.json"
 #dev_filename = "../data/squad20/dev-v2.0.json"
-dev_filename = "../data/squad20/test.json"
+dev_filename = "test.json"
 grad_acc_steps=1
 evaluate_every = 5000
 max_seq_len = 384
@@ -138,7 +138,8 @@ if train:
 if inference:
   model = Inferencer.load(save_dir, batch_size=5, gpu=False)
   result = model.inference_from_file(
-    file=inference_file
+    file=inference_file,
+    rest_api_schema=True
     #max_processes=8,
   )
 

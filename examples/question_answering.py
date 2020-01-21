@@ -33,7 +33,7 @@ batch_size = 5
 n_epochs = 2
 evaluate_every = 500
 base_LM_model = "bert-base-cased"
-train_filename="train-v2.0.json"
+train_filename="test.json"
 dev_filename="dev-v2.0.json"
 train = False
 
@@ -106,7 +106,8 @@ inference_file = "../data/squad20/test.json"
 save_dir = "../data/bert-english-qa-large"
 model = Inferencer.load(save_dir, batch_size=5, gpu=True)
 result = model.inference_from_file(
-    file=inference_file
+    file=inference_file,
+    rest_api_schema=True
 )
 
 for x in result:
