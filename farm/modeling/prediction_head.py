@@ -262,11 +262,11 @@ class TextClassificationHead(PredictionHead):
         """
         super(TextClassificationHead, self).__init__()
         # num_labels could in most cases also be automatically retrieved from the data processor
-        if num_labels:
-            self.layer_dims = [768, num_labels]
-        elif layer_dims:
+        if layer_dims:
             self.layer_dims = layer_dims
             logger.warning("`layer_dims` will be deprecated in future releases")
+        elif num_labels:
+            self.layer_dims = [768, num_labels]
         else:
             raise ValueError("Please supply `num_labels` to define output dim of prediction head")
         self.num_labels = self.layer_dims[-1]
@@ -318,6 +318,8 @@ class TextClassificationHead(PredictionHead):
             # b) transformers style
             # load all weights from model
             full_model = AutoModelForSequenceClassification.from_pretrained(pretrained_model_name_or_path)
+            print("toto")
+            print(full_model.config)
             # init empty head
             head = cls(layer_dims=[full_model.config.hidden_size, len(full_model.config.id2label)])
             # transfer weights for head from full model

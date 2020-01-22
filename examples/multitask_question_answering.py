@@ -138,7 +138,7 @@ if train:
   )
 
   # 7. Let it grow! Watch the tracked metrics live on the public mlflow server: https://public-mlflow.deepset.ai
-  model = trainer.train()
+  trainer.train()
 
   # 8. Hooray! You have a model. Store it:
   model.save(save_dir)
