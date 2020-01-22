@@ -1,6 +1,5 @@
-import logging
 from pathlib import Path
-
+import logging
 import numpy as np
 
 from farm.data_handler.data_silo import DataSilo
@@ -8,29 +7,32 @@ from farm.data_handler.processor import TextClassificationProcessor
 from farm.modeling.optimization import initialize_optimizer
 from farm.infer import Inferencer
 from farm.modeling.adaptive_model import AdaptiveModel
-from farm.modeling.language_model import Roberta
+from farm.modeling.language_model import DistilBert
 from farm.modeling.prediction_head import TextClassificationHead
-from farm.modeling.tokenization import RobertaTokenizer
+from farm.modeling.tokenization import Tokenizer
 from farm.train import Trainer
 from farm.utils import set_all_seeds, initialize_device_settings
 
-def test_doc_classification():
-    #caplog.set_level(logging.CRITICAL)
+
+def test_doc_classification(caplog=None):
+    if caplog:
+        caplog.set_level(logging.CRITICAL)
 
     set_all_seeds(seed=42)
-    device, n_gpu = initialize_device_settings(use_cuda=False)
+    device, n_gpu = initialize_device_settings(use_cuda=True)
     n_epochs = 1
     batch_size = 1
     evaluate_every = 2
-    lang_model = "roberta-base"
+    lang_model = "distilbert-base-german-cased"
 
-    tokenizer = RobertaTokenizer.from_pretrained(
-        pretrained_model_name_or_path=lang_model)
+    tokenizer = Tokenizer.load(
+        pretrained_model_name_or_path=lang_model,
+        do_lower_case=False)
 
     processor = TextClassificationProcessor(tokenizer=tokenizer,
                                             max_seq_len=8,
                                             data_dir=Path("samples/doc_class"),
-                                            train_filename="train-sample.tsv",
+                                            train_filename=Path("train-sample.tsv"),
                                             label_list=["OTHER", "OFFENSE"],
                                             metric="f1_macro",
                                             dev_filename="test-sample.tsv",
@@ -42,7 +44,7 @@ def test_doc_classification():
         processor=processor,
         batch_size=batch_size)
 
-    language_model = Roberta.load(lang_model)
+    language_model = DistilBert.load(lang_model)
     prediction_head = TextClassificationHead(num_labels=2)
     model = AdaptiveModel(
         language_model=language_model,
@@ -54,7 +56,6 @@ def test_doc_classification():
     model, optimizer, lr_schedule = initialize_optimizer(
         model=model,
         learning_rate=2e-5,
-        #optimizer_opts={'name': 'AdamW', 'lr': 2E-05},
         n_batches=len(data_silo.loaders["train"]),
         n_epochs=1,
         device=device,
@@ -72,19 +73,19 @@ def test_doc_classification():
 
     trainer.train()
 
-    save_dir = Path("testsave/doc_class_roberta")
+    save_dir = Path("testsave/doc_class")
     model.save(save_dir)
     processor.save(save_dir)
 
     basic_texts = [
-        {"text": "Martin Müller spielt Handball in Berlin."},
+        {"text": "Malte liebt Berlin."},
         {"text": "Schartau sagte dem Tagesspiegel, dass Fischer ein Idiot sei."}
     ]
 
 
-    inf = Inferencer.load(save_dir,batch_size=2)
+    inf = Inferencer.load(save_dir, batch_size=2)
     result = inf.inference_from_dicts(dicts=basic_texts)
-    assert isinstance(result[0]["predictions"][0]["probability"],np.float32)
+    assert isinstance(result[0]["predictions"][0]["probability"], np.float32)
 
 
 if __name__ == "__main__":

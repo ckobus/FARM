@@ -5,6 +5,7 @@ import random
 import tarfile
 import tempfile
 from itertools import islice
+from pathlib import Path
 from collections import namedtuple
 
 import pandas as pd
@@ -31,7 +32,7 @@ DOWNSTREAM_TASK_MAP = {
     'cola': "https://s3.eu-central-1.amazonaws.com/deepset.ai-farm-downstream/cola.tar.gz",
 }
 
-def read_tsv(filename, rename_columns, quotechar='"', delimiter="\t", skiprows=None, header=0, proxies=None):
+def read_tsv(filename, rename_columns, quotechar='"', delimiter="\t", skiprows=None, header=0, proxies=None, max_samples=None):
     """Reads a tab separated value file. Tries to download the data if filename is not found"""
 
     # get remote dataset if needed
@@ -49,6 +50,8 @@ def read_tsv(filename, rename_columns, quotechar='"', delimiter="\t", skiprows=N
         skiprows=skiprows,
         header=header
     )
+    if max_samples:
+        df = df.sample(max_samples)
 
     # let's rename our target columns to the default names FARM expects:
     # "text": contains the text
@@ -193,17 +196,17 @@ def write_nq_predictions(predictions, out_filename, predictions_filename=None):
             predictions_json[c.id] = ''
 
     os.makedirs("model_output", exist_ok=True)
-    filepath = os.path.join("model_output",out_filename)
+    filepath = Path("model_output") / out_filename
     json.dump(predictions_json, open(filepath, "w"))
     logger.info(f"Written Squad predictions to: {filepath}")
 
 
 def _download_extract_downstream_data(input_file, proxies=None):
     # download archive to temp dir and extract to correct position
-    full_path = os.path.realpath(input_file)
-    directory = os.path.dirname(full_path)
-    taskname = directory.split("/")[-1]
-    datadir = "/".join(directory.split("/")[:-1])
+    full_path = Path(os.path.realpath(input_file))
+    directory = full_path.parent
+    taskname = directory.stem
+    datadir = directory.parent
     logger.info(
         "downloading and extracting file {} to dir {}".format(taskname, datadir)
     )
@@ -221,7 +224,11 @@ def _download_extract_downstream_data(input_file, proxies=None):
     elif taskname not in DOWNSTREAM_TASK_MAP:
         logger.error("Cannot download {}. Unknown data source.".format(taskname))
     else:
-        with tempfile.NamedTemporaryFile() as temp_file:
+        if os.name == "nt":  # make use of NamedTemporaryFile compatible with Windows
+            delete_tmp_file = False
+        else:
+            delete_tmp_file = True
+        with tempfile.NamedTemporaryFile(delete=delete_tmp_file) as temp_file:
             http_get(DOWNSTREAM_TASK_MAP[taskname], temp_file, proxies=proxies)
             temp_file.flush()
             temp_file.seek(0)  # making tempfile accessible
@@ -232,7 +239,7 @@ def _download_extract_downstream_data(input_file, proxies=None):
 
 def _conll03get(dataset, directory, language):
     # open in binary mode
-    with open(os.path.join(directory, f"{dataset}.txt"), "wb") as file:
+    with open(directory / f"{dataset}.txt", "wb") as file:
         # get request
         response = get(DOWNSTREAM_TASK_MAP[f"conll03{language}{dataset}"])
         # write to file
@@ -443,6 +450,8 @@ def mask_random_words(tokens, vocab, token_groups=None, max_predictions_per_seq=
 
 
 def is_json(x):
+    if issubclass(type(x), Path):
+        return True
     try:
         json.dumps(x)
         return True

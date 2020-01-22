@@ -7,13 +7,16 @@ from functools import partial
 import torch
 from torch.utils.data.sampler import SequentialSampler
 from tqdm import tqdm
+from transformers.configuration_auto import AutoConfig
 
 from farm.data_handler.dataloader import NamedDataLoader
-from farm.data_handler.processor import Processor, InferenceProcessor
+from farm.data_handler.processor import Processor, InferenceProcessor, SquadProcessor, NERProcessor, TextClassificationProcessor
 from farm.data_handler.utils import grouper
+from farm.modeling.tokenization import Tokenizer
 from farm.modeling.adaptive_model import AdaptiveModel
 from farm.utils import initialize_device_settings
 from farm.utils import set_all_seeds, calc_chunksize, log_ascii_workers
+
 
 logger = logging.getLogger(__name__)
 
@@ -88,29 +91,34 @@ class Inferencer:
         self.return_class_probs = return_class_probs
 
         model.connect_heads_with_processor(processor.tasks, require_labels=False)
-        set_all_seeds(42, n_gpu)
+        set_all_seeds(42)
 
     @classmethod
     def load(
         cls,
-        load_dir,
+        model_name_or_path,
         batch_size=4,
         gpu=False,
-        embedder_only=False,
+        task_type=None,
         return_class_probs=False,
-        strict=True
+        strict=True,
+        max_seq_len=256
     ):
         """
-        Initializes Inferencer from directory with saved model.
+        Load an Inferencer incl. all relevant components (model, tokenizer, processor ...) either by
 
-        :param load_dir: Directory where the saved model is located.
-        :type load_dir: str
+        1. specifying a public name from transformers' model hub (https://huggingface.co/models)
+        2. or pointing to a local directory it is saved in.
+
+        :param model_name_or_path: Local directory or public name of the model to load.
+        :type model_name_or_path: str
         :param batch_size: Number of samples computed once per batch
         :type batch_size: int
         :param gpu: If GPU shall be used
         :type gpu: bool
-        :param embedder_only: If true, a faster processor (InferenceProcessor) is loaded. This should only be used for extracting embeddings (no downstream predictions).
-        :type embedder_only: bool
+        :param task_type: Type of task the model should be used for. Currently supporting:
+                          "embeddings", "question_answering", "text_classification". More coming soon...
+        :param task_type: str
         :param strict: whether to strictly enforce that the keys loaded from saved model match the ones in
                        the PredictionHead (see torch.nn.module.load_state_dict()).
                        Set to `False` for backwards compatibility with PHs saved with older version of FARM.
@@ -120,15 +128,76 @@ class Inferencer:
         """
 
         device, n_gpu = initialize_device_settings(use_cuda=gpu, local_rank=-1, use_amp=None)
+        name = os.path.basename(model_name_or_path)
 
-        model = AdaptiveModel.load(load_dir, device, strict=strict)
-        if embedder_only:
-            # model.prediction_heads = []
-            processor = InferenceProcessor.load_from_dir(load_dir)
+        # a) either from local dir
+        if os.path.exists(model_name_or_path):
+            model = AdaptiveModel.load(model_name_or_path, device, strict=strict)
+            if task_type == "embeddings":
+                processor = InferenceProcessor.load_from_dir(model_name_or_path)
+            else:
+                processor = Processor.load_from_dir(model_name_or_path)
+
+        # b) or from remote transformers model hub
         else:
-            processor = Processor.load_from_dir(load_dir)
+            if not task_type:
+                raise ValueError("Please specify the 'task_type' of the model you want to load from transformers. "
+                                 "Valid options for arg `task_type`:"
+                                 "'question_answering', 'embeddings', 'text_classification'")
 
-        name = os.path.basename(load_dir)
+            model = AdaptiveModel.convert_from_transformers(model_name_or_path, device, task_type)
+            config = AutoConfig.from_pretrained(model_name_or_path)
+            tokenizer = Tokenizer.load(model_name_or_path)
+
+            # TODO infer task_type automatically from config (if possible)
+            if task_type == "question_answering":
+                processor = SquadProcessor(
+                    tokenizer=tokenizer,
+                    max_seq_len=max_seq_len,
+                    label_list=["start_token", "end_token"],
+                    metric="squad",
+                    data_dir=None,
+                )
+            elif task_type == "embeddings":
+                processor = InferenceProcessor(tokenizer=tokenizer, max_seq_len=max_seq_len)
+
+            elif task_type == "text_classification":
+                label_list = list(config.id2label[id] for id in range(len(config.id2label)))
+                processor = TextClassificationProcessor(tokenizer=tokenizer,
+                                                        max_seq_len=max_seq_len,
+                                                        data_dir=None,
+                                                        label_list=label_list,
+                                                        label_column_name="label",
+                                                        metric="acc",
+                                                        quote_char='"',
+                                                        )
+
+            # elif task_type == "multilabel-classification":
+            #     # label_list = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
+            #     label_list = list(config.label2id.keys())
+            #
+            #     processor = TextClassificationProcessor(tokenizer=tokenizer,
+            #                                             max_seq_len=max_seq_len,
+            #                                             data_dir=None,
+            #                                             label_list=label_list,
+            #                                             label_column_name="label",
+            #                                             metric="acc",
+            #                                             quote_char='"',
+            #                                             multilabel=True,
+            #                                             )
+            # TODO NER style in FARM differs because we have the "X" label for subword tokens
+            # elif task_type == "ner":
+            #     label_list = list(config.label2id.keys())
+            #     # label_list = ["[PAD]", "X", "O", "B-MISC", "I-MISC", "B-PER", "I-PER", "B-ORG", "I-ORG", "B-LOC",
+            #     #               "I-LOC", "B-OTH", "I-OTH"]
+            #     processor = NERProcessor(
+            #         tokenizer=tokenizer, max_seq_len=256, data_dir=None, metric="seq_f1",
+            #         label_list=label_list
+            #     )
+            else:
+                raise ValueError(f"`task_type` {task_type} is not supported yet. "
+                                 f"Valid options for arg `task_type`: 'question_answering', 'embeddings', 'text_classification'")
+
         return cls(
             model,
             processor,
@@ -138,9 +207,15 @@ class Inferencer:
             return_class_probs=return_class_probs,
         )
 
+    def save(self, path):
+        self.model.save(path)
+        self.processor.save(path)
+
     def inference_from_file(self, file, rest_api_schema=False, max_processes=128):
         """
-        Run downstream inference on the dicts in the file.
+        Run down-stream inference on samples created from an input file.
+        The file should be in the same format as the ones used during training
+        (e.g. squad style for QA, tsv for doc classification ...) as the same processor will be used for conversion .
 
         :param file: path of the input file for Inference
         :type file: str
@@ -153,11 +228,18 @@ class Inferencer:
 
     def inference_from_dicts(self, dicts, rest_api_schema=False, max_processes=128):
         """
-        Runs down-stream inference using the prediction head.
+        Runs down-stream inference on samples created from input dictionaries.
+        The format of the input `dicts` depends on the task:
+
+        QA:                    [{"qas": ["What is X?"], "context":  "Some context containing the answer"}]
+        Classification / NER:  [{"text": "Some input text"}]
+
 
         :param dicts: Samples to run inference on provided as a list of dicts. One dict per sample.
         :type dicts: [dict]
-        :param rest_api_schema: whether conform to the schema used for dicts in the HTTP API for Inference.
+        :param rest_api_schema: Whether input dicts use the format that complies with the FARM REST API.
+                                Currently only used for QA to switch from squad to a more useful format in production.
+                                While input is almost the same, output contains additional meta data(offset, context..)
         :type rest_api_schema: bool
         :return: dict of predictions
         :param max_processes: the maximum size of `multiprocessing.Pool`. Set to value of 1 to disable multiprocessing.
@@ -172,45 +254,57 @@ class Inferencer:
                 f"b) ... run inference on a downstream task: make sure your model path {self.name} contains a saved prediction head"
             )
 
+        # Using multiprocessing
         if max_processes > 1:  # use multiprocessing if max_processes > 1
             multiprocessing_chunk_size, num_cpus_used = calc_chunksize(len(dicts), max_processes)
             with ExitStack() as stack:
-                p = stack.enter_context(mp.Pool(processes=num_cpus_used))
 
+                # Get us some workers (i.e. processes)
+                p = stack.enter_context(mp.Pool(processes=num_cpus_used))
                 logger.info(
                     f"Got ya {num_cpus_used} parallel workers to do inference on {len(dicts)}dicts (chunksize = {multiprocessing_chunk_size})..."
                 )
                 log_ascii_workers(num_cpus_used, logger)
 
+                # We group the input dicts into chunks and feed each chunk to a different process,
+                # where it gets converted to a pytorch dataset
                 results = p.imap(
                     partial(self._create_datasets_chunkwise, processor=self.processor, rest_api_schema=rest_api_schema),
                     grouper(dicts, multiprocessing_chunk_size),
                     1,
                 )
 
+                # Once a process spits out a preprocessed chunk. we feed this dataset directly to the model.
+                # So we don't need to wait until all preprocessing has finished before getting first predictions.
                 preds_all = []
                 with tqdm(total=len(dicts), unit=" Dicts") as pbar:
                     for dataset, tensor_names, baskets in results:
                         # TODO change formot of formatted_preds in QA (list of dicts)
-                        preds_all.extend(self._run_inference(dataset, tensor_names, baskets, rest_api_schema))
+                        preds_all.extend(self._get_predictions(dataset, tensor_names, baskets, rest_api_schema))
                         pbar.update(multiprocessing_chunk_size)
 
+        # Using single process (helpful for debugging!)
         else:
             chunk = next(grouper(dicts, len(dicts)))
             dataset, tensor_names, baskets = self._create_datasets_chunkwise(chunk, processor=self.processor, rest_api_schema=rest_api_schema)
             # TODO change formot of formatted_preds in QA (list of dicts)
-            preds_all = self._run_inference(dataset, tensor_names, baskets, rest_api_schema)
+            preds_all = self._get_predictions(dataset, tensor_names, baskets, rest_api_schema)
 
         return preds_all
 
     @classmethod
     def _create_datasets_chunkwise(cls, chunk, processor, rest_api_schema):
+        """Convert ONE chunk of data (i.e. dictionaries) into ONE pytorch dataset.
+        This is usually executed in one of many parallel processes.
+        The resulting datasets of the processes are merged together afterwards"""
+
         dicts = [d[1] for d in chunk]
         indices = [d[0] for d in chunk]
         dataset, tensor_names, baskets = processor.dataset_from_dicts(dicts, indices, rest_api_schema, return_baskets=True)
         return dataset, tensor_names, baskets
 
-    def _run_inference(self, dataset, tensor_names, baskets, rest_api_schema=False):
+    def _get_predictions(self, dataset, tensor_names, baskets, rest_api_schema=False):
+        """ Feed the preprocessed dataset to the model and get the actual predictions"""
         samples = [s for b in baskets for s in b.samples]
 
         data_loader = NamedDataLoader(
@@ -229,6 +323,8 @@ class Inferencer:
             batch = {key: batch[key].to(self.device) for key in batch}
             if not aggregate_preds:
                 batch_samples = samples[i * self.batch_size : (i + 1) * self.batch_size]
+
+            # get logits
             with torch.no_grad():
                 logits = self.model.forward(**batch)
                 if not aggregate_preds:
@@ -262,6 +358,10 @@ class Inferencer:
     ):
         """
         Converts a text into vector(s) using the language model only (no prediction head involved).
+
+        Example:
+            basic_texts = [{"text": "Some text we want to embed"}, {"text": "And a second one"}]
+            result = inferencer.extract_vectors(dicts=basic_texts)
 
         :param dicts: Samples to run inference on provided as a list of dicts. One dict per sample.
         :type dicts: [dict]
@@ -306,7 +406,7 @@ class FasttextInferencer:
         self.prediction_type = "embedder"
 
     @classmethod
-    def load(cls, load_dir, batch_size=4, gpu=False, embedder_only=True):
+    def load(cls, load_dir, batch_size=4, gpu=False):
         import fasttext
 
         if os.path.isfile(load_dir):

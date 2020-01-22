@@ -142,3 +142,6 @@ model_output/
 #mlruns
 mlruns/
 .DS_Store
+
+# cache
+*cache*

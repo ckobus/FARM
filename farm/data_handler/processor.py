@@ -1,12 +1,13 @@
-import os
 import abc
-from abc import ABC
-import random
-import logging
-import json
-import time
 import inspect
+import json
+import logging
+import os
+import random
+from abc import ABC
 from inspect import signature
+from pathlib import Path
+
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 
@@ -31,10 +32,11 @@ from farm.data_handler.utils import (
     read_ner_file,
     read_squad_file,
     is_json,
+    get_sentence_pair,
 )
 from farm.modeling.tokenization import Tokenizer, tokenize_with_metadata, truncate_sequences
 from farm.utils import MLFlowLogger as MlLogger
-from farm.data_handler.utils import get_sentence_pair
+
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +98,8 @@ class Processor(ABC):
         self.dev_filename = dev_filename
         self.test_filename = test_filename
         self.dev_split = dev_split
-        self.data_dir = data_dir
+        if data_dir:
+            self.data_dir = Path(data_dir)
 
         self.baskets = []
 
@@ -174,7 +177,7 @@ class Processor(ABC):
         :return: An instance of a Processor Subclass (e.g. GNADProcessor)
         """
         # read config
-        processor_config_file = os.path.join(load_dir, "processor_config.json")
+        processor_config_file = Path(load_dir) / "processor_config.json"
         config = json.load(open(processor_config_file))
         # init tokenizer
         if "lower_case" in config.keys():
@@ -212,7 +215,7 @@ class Processor(ABC):
         self.tokenizer.save_pretrained(save_dir)
         # save processor
         config["processor"] = self.__class__.__name__
-        output_config_file = os.path.join(save_dir, "processor_config.json")
+        output_config_file = Path(save_dir) / "processor_config.json"
         with open(output_config_file, "w") as file:
             json.dump(config, file)
 
@@ -224,6 +227,8 @@ class Processor(ABC):
         # self.__dict__ doesn't give parent class attributes
         for key, value in inspect.getmembers(self):
             if is_json(value) and key[0] != "_":
+                if issubclass(type(value), Path):
+                    value = str(value)
                 config[key] = value
         return config
 
@@ -257,7 +262,7 @@ class Processor(ABC):
 
     def _init_baskets_from_file(self, file):
         dicts = self.file_to_dicts(file)
-        dataset_name = os.path.splitext(os.path.basename(file))[0]
+        dataset_name = file.stem
         baskets = [
             SampleBasket(raw=tr, id=f"{dataset_name}-{i}") for i, tr in enumerate(dicts)
         ]
@@ -371,6 +376,7 @@ class TextClassificationProcessor(Processor):
         multilabel=False,
         header=0,
         proxies=None,
+        max_samples=None,
         **kwargs
     ):
         """
@@ -419,6 +425,7 @@ class TextClassificationProcessor(Processor):
         self.quote_char = quote_char
         self.skiprows = skiprows
         self.header = header
+        self.max_samples = max_samples
 
         super(TextClassificationProcessor, self).__init__(
             tokenizer=tokenizer,
@@ -455,7 +462,8 @@ class TextClassificationProcessor(Processor):
             quotechar=self.quote_char,
             rename_columns=column_mapping,
             header=self.header,
-            proxies=self.proxies
+            proxies=self.proxies,
+            max_samples=self.max_samples
             )
 
         return dicts
@@ -518,7 +526,7 @@ class InferenceProcessor(Processor):
         :return: An instance of an InferenceProcessor
         """
         # read config
-        processor_config_file = os.path.join(load_dir, "processor_config.json")
+        processor_config_file = Path(load_dir) / "processor_config.json"
         config = json.load(open(processor_config_file))
         # init tokenizer
         tokenizer = Tokenizer.load(load_dir, tokenizer_class=config["tokenizer"])
@@ -535,7 +543,7 @@ class InferenceProcessor(Processor):
         return processor
 
     def file_to_dicts(self, file: str) -> [dict]:
-      raise NotImplementedError
+        raise NotImplementedError
 
     def _dict_to_samples(self, dictionary: dict, **kwargs) -> [Sample]:
         # this tokenization also stores offsets
@@ -721,10 +729,15 @@ class BertStyleLMProcessor(Processor):
         )
 
         self.next_sent_pred = next_sent_pred
-
-        self.add_task("lm", "acc", list(self.tokenizer.vocab))
+        added_tokens = self.get_added_tokens()
+        self.add_task("lm", "acc", list(self.tokenizer.vocab) + added_tokens)
         if self.next_sent_pred:
             self.add_task("nextsentence", "acc", ["False", "True"])
+
+    def get_added_tokens(self):
+        dictionary = self.tokenizer.added_tokens_encoder
+        sorted_tuples = sorted(dictionary.items(), key=lambda x: x[0])
+        return [x[1] for x in sorted_tuples]
 
     def file_to_dicts(self, file: str) -> list:
         dicts = read_docs_from_txt(filename=file, delimiter=self.delimiter, max_docs=self.max_docs, proxies=self.proxies)
@@ -804,8 +817,8 @@ class SquadProcessor(Processor):
         data_dir,
         label_list=None,
         metric="squad",
-        train_filename="train-v2.0.json",
-        dev_filename="dev-v2.0.json",
+        train_filename=Path("train-v2.0.json"),
+        dev_filename=Path("dev-v2.0.json"),
         test_filename=None,
         dev_split=0,
         doc_stride=128,
@@ -909,15 +922,22 @@ class SquadProcessor(Processor):
         document_start_of_word = [int(x) for x in document_tokenized["start_of_word"]]
         questions = dictionary["qas"]
         for question in questions:
-            squad_id = question["id"]
-            question_text = question["question"]
+            answers = []
+            # For training and dev where labelled samples are read in from a SQuAD style file
+            try:
+                squad_id = question["id"]
+                question_text = question["question"]
+                for answer in question["answers"]:
+                    a = {"text": answer["text"],
+                         "offset": answer["answer_start"]}
+                    answers.append(a)
+            # For inference where samples are read in as dicts without an id or answers
+            except TypeError:
+                squad_id = None
+                question_text = question
             question_tokenized = tokenize_with_metadata(question_text, self.tokenizer)
             question_start_of_word = [int(x) for x in question_tokenized["start_of_word"]]
-            answers = []
-            for answer in question["answers"]:
-                a = {"text": answer["text"],
-                     "offset": answer["answer_start"]}
-                answers.append(a)
+
             if "is_impossible" not in question:
                 is_impossible = False
             else:
@@ -1058,6 +1078,7 @@ class RegressionProcessor(Processor):
             proxies=proxies
         )
 
+        # Note that label_list is being hijacked to store the scaling mean and scale
         self.add_task(name="regression", metric="mse", label_list= [scaler_mean, scaler_scale], label_column_name=label_column_name, task_type="regression", label_name=label_name)
 
     def file_to_dicts(self, file: str) -> [dict]:

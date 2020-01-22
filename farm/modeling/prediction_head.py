@@ -6,9 +6,11 @@ import numpy as np
 import pandas as pd
 from scipy.special import expit, softmax
 import tqdm
-
+from pathlib import Path
 import torch
-from transformers.modeling_bert import BertForPreTraining, BertLayerNorm, ACT2FN, BertForQuestionAnswering
+from transformers.modeling_bert import BertForPreTraining, BertLayerNorm, ACT2FN
+from transformers.modeling_auto import AutoModelForQuestionAnswering, AutoModelForTokenClassification, AutoModelForSequenceClassification
+from transformers.configuration_auto import AutoConfig
 
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss, BCEWithLogitsLoss
@@ -59,13 +61,11 @@ class PredictionHead(nn.Module):
         Saves the config as a json file.
 
         :param save_dir: Path to save config to
-        :type save_dir: str
+        :type save_dir: str or Path
         :param head_num: Which head to save
         :type head_num: int
         """
-        output_config_file = os.path.join(
-            save_dir, f"prediction_head_{head_num}_config.json"
-        )
+        output_config_file = Path(save_dir) / f"prediction_head_{head_num}_config.json"
         with open(output_config_file, "w") as file:
             json.dump(self.config, file)
 
@@ -74,11 +74,11 @@ class PredictionHead(nn.Module):
         Saves the prediction head state dict.
 
         :param save_dir: path to save prediction head to
-        :type save_dir: str
+        :type save_dir: str or Path
         :param head_num: which head to save
         :type head_num: int
         """
-        output_model_file = os.path.join(save_dir, f"prediction_head_{head_num}.bin")
+        output_model_file = Path(save_dir) / f"prediction_head_{head_num}.bin"
         torch.save(self.state_dict(), output_model_file)
         self.save_config(save_dir, head_num)
 
@@ -151,11 +151,27 @@ class PredictionHead(nn.Module):
         # TODO maybe just return **kwargs to not force people to implement this
         raise NotImplementedError()
 
+    def resize_input(self, input_dim):
+        """ This function compares the output dimensionality of the language model against the input dimensionality
+        of the prediction head. If there is a mismatch, the prediction head will be resized to fit."""
+        if "feed_forward" not in dir(self):
+            return
+        else:
+            old_dims = self.feed_forward.layer_dims
+            if input_dim == old_dims[0]:
+                return
+            new_dims = [input_dim] + old_dims[1:]
+            logger.info(f"Resizing input dimensions of {type(self).__name__} ({self.task_name}) "
+                  f"from {old_dims} to {new_dims} to match language model")
+            self.feed_forward = FeedForwardBlock(new_dims)
+            self.layer_dims[0] = input_dim
+            self.feed_forward.layer_dims[0] = input_dim
+
     @classmethod
     def _get_model_file(cls, config_file):
-        if "config.json" in config_file and "prediction_head" in config_file:
+        if "config.json" in str(config_file) and "prediction_head" in str(config_file):
             head_num = int("".join([char for char in os.path.basename(config_file) if char.isdigit()]))
-            model_file = os.path.join(os.path.dirname(config_file), f"prediction_head_{head_num}.bin")
+            model_file = Path(os.path.dirname(config_file)) / f"prediction_head_{head_num}.bin"
         else:
             raise ValueError(f"This doesn't seem to be a proper prediction_head config file: '{config_file}'")
         return model_file
@@ -167,7 +183,7 @@ class PredictionHead(nn.Module):
 class RegressionHead(PredictionHead):
     def __init__(
         self,
-        layer_dims,
+        layer_dims=[768,1],
         task_name="regression",
         **kwargs,
     ):
@@ -175,6 +191,7 @@ class RegressionHead(PredictionHead):
         # num_labels could in most cases also be automatically retrieved from the data processor
         self.layer_dims = layer_dims
         self.feed_forward = FeedForwardBlock(self.layer_dims)
+        # num_labels is being set to 2 since it is being hijacked to store the scaling factor and the mean
         self.num_labels = 2
         self.ph_output_type = "per_sequence_continuous"
         self.model_type = "regression"
@@ -223,7 +240,8 @@ class RegressionHead(PredictionHead):
 class TextClassificationHead(PredictionHead):
     def __init__(
         self,
-        layer_dims,
+        layer_dims=None,
+        num_labels=None,
         class_weights=None,
         loss_ignore_index=-100,
         loss_reduction="none",
@@ -231,10 +249,29 @@ class TextClassificationHead(PredictionHead):
         context_window_size=100, n_best=5,
         **kwargs,
     ):
+        """
+        :param layer_dims: The size of the layers in the feed forward component. The feed forward will have as many layers as there are ints in this list. This param will be deprecated in future
+        :type layer_dims: list
+        :param num_labels: The numbers of labels. Use to set the size of the final layer in the feed forward component. It is recommended to only set num_labels or layer_dims, not both.
+        :type num_labels: int
+        :param class_weights:
+        :param loss_ignore_index:
+        :param loss_reduction:
+        :param task_name:
+        :param kwargs:
+        """
         super(TextClassificationHead, self).__init__()
         # num_labels could in most cases also be automatically retrieved from the data processor
-        self.layer_dims = layer_dims
+        if num_labels:
+            self.layer_dims = [768, num_labels]
+        elif layer_dims:
+            self.layer_dims = layer_dims
+            logger.warning("`layer_dims` will be deprecated in future releases")
+        else:
+            raise ValueError("Please supply `num_labels` to define output dim of prediction head")
+        self.num_labels = self.layer_dims[-1]
         self.feed_forward = FeedForwardBlock(self.layer_dims)
+        logger.info(f"Prediction head initialized with size {self.layer_dims}")
         self.num_labels = self.layer_dims[-1]
         self.ph_output_type = "per_sequence"
         self.model_type = "text_classification"
@@ -257,6 +294,37 @@ class TextClassificationHead(PredictionHead):
 
         self.generate_config()
 
+    @classmethod
+    def load(cls, pretrained_model_name_or_path):
+        """
+        Load a prediction head from a saved FARM or transformers model. If `pretrained_model_name_or_path`
+        is not a local path, we will try to resolve it with a public model hub (https://huggingface.co/models)
+
+        :param pretrained_model_name_or_path: local path of a saved model or name of a publicly available model.
+                                              Exemplary names:
+                                              - distilbert-base-uncased-distilled-squad
+                                              - bert-large-uncased-whole-word-masking-finetuned-squad
+
+                                              See https://huggingface.co/models for full list
+
+        """
+
+        if os.path.exists(pretrained_model_name_or_path) \
+                and "config.json" in pretrained_model_name_or_path \
+                and "prediction_head" in pretrained_model_name_or_path:
+            # a) FARM style
+            super(TextClassificationHead, cls).load(pretrained_model_name_or_path)
+        else:
+            # b) transformers style
+            # load all weights from model
+            full_model = AutoModelForSequenceClassification.from_pretrained(pretrained_model_name_or_path)
+            # init empty head
+            head = cls(layer_dims=[full_model.config.hidden_size, len(full_model.config.id2label)])
+            # transfer weights for head from full model
+            head.feed_forward.feed_forward[0].load_state_dict(full_model.classifier.state_dict())
+            del full_model
+
+        return head
     def forward(self, X):
         logits = self.feed_forward(X)
         return logits
@@ -469,18 +537,37 @@ class TextClassificationHead(PredictionHead):
 class MultiLabelTextClassificationHead(PredictionHead):
     def __init__(
         self,
-        layer_dims,
+        layer_dims=None,
+        num_labels=None,
         class_weights=None,
         loss_reduction="none",
         task_name="text_classification",
         pred_threshold=0.5,
         **kwargs,
     ):
+        """
+        :param layer_dims: The size of the layers in the feed forward component. The feed forward will have as many layers as there are ints in this list. This param will be deprecated in future
+        :type layer_dims: list
+        :param num_labels: The numbers of labels. Use to set the size of the final layer in the feed forward component. It is recommended to only set num_labels or layer_dims, not both.
+        :type num_labels: int
+        :param class_weights:
+        :param loss_reduction:
+        :param task_name:
+        :param pred_threshold:
+        :param kwargs:
+        """
         super(MultiLabelTextClassificationHead, self).__init__()
         # num_labels could in most cases also be automatically retrieved from the data processor
-        self.layer_dims = layer_dims
-        self.feed_forward = FeedForwardBlock(self.layer_dims)
+        if num_labels:
+            self.layer_dims = [768, num_labels]
+        elif layer_dims:
+            self.layer_dims = layer_dims
+            logger.warning("`layer_dims` will be deprecated in future releases")
+        else:
+            raise ValueError("Please supply `num_labels` to define output dim of prediction head")
         self.num_labels = self.layer_dims[-1]
+        logger.info(f"Prediction head initialized with size {self.layer_dims}")
+        self.feed_forward = FeedForwardBlock(self.layer_dims)
         self.ph_output_type = "per_sequence"
         self.model_type = "multilabel_text_classification"
         self.task_name = task_name #used for connecting with the right output of the processor
@@ -557,10 +644,29 @@ class MultiLabelTextClassificationHead(PredictionHead):
 
 
 class TokenClassificationHead(PredictionHead):
-    def __init__(self, layer_dims, task_name="ner", **kwargs):
+    def __init__(self,
+                 layer_dims=None,
+                 num_labels=None,
+                 task_name="ner",
+                 **kwargs):
+        """
+        :param layer_dims: The size of the layers in the feed forward component. The feed forward will have as many layers as there are ints in this list. This param will be deprecated in future
+        :type layer_dims: list
+        :param num_labels: The numbers of labels. Use to set the size of the final layer in the feed forward component. It is recommended to only set num_labels or layer_dims, not both.
+        :type num_labels: int
+        :param task_name:
+        :param kwargs:
+        """
         super(TokenClassificationHead, self).__init__()
-
-        self.layer_dims = layer_dims
+        if num_labels:
+            self.layer_dims = [768, num_labels]
+        elif layer_dims:
+            self.layer_dims = layer_dims
+            logger.warning("`layer_dims` will be deprecated in future releases")
+        else:
+            raise ValueError("Please supply `num_labels` to define output dim of prediction head")
+        self.num_labels = self.layer_dims[-1]
+        logger.info(f"Prediction head initialized with size {self.layer_dims}")
         self.feed_forward = FeedForwardBlock(self.layer_dims)
         self.num_labels = self.layer_dims[-1]
         self.loss_fct = CrossEntropyLoss(reduction="none")
@@ -568,6 +674,36 @@ class TokenClassificationHead(PredictionHead):
         self.model_type = "token_classification"
         self.task_name = task_name
         self.generate_config()
+
+    @classmethod
+    def load(cls, pretrained_model_name_or_path):
+        """
+        Load a prediction head from a saved FARM or transformers model. If `pretrained_model_name_or_path`
+        is not a local path, we will try to resolve it with a public model hub (https://huggingface.co/models)
+
+        :param pretrained_model_name_or_path: local path of a saved model or name of a publicly available model.
+                                              Examplary names:
+                                              - asdas
+                                              See https://huggingface.co/models for full list
+
+        """
+
+        if os.path.exists(pretrained_model_name_or_path) \
+                and "config.json" in pretrained_model_name_or_path \
+                and "prediction_head" in pretrained_model_name_or_path:
+            # a) FARM style
+            return super(TokenClassificationHead, cls).load(pretrained_model_name_or_path)
+        else:
+            raise NotImplementedError("Loading prediction head from transformers format is not supported yet.")
+            # # b) transformers style
+            # # load all weights from model
+            # full_model = AutoModelForTokenClassification.from_pretrained(pretrained_model_name_or_path)
+            # # init empty head
+            # head = cls(layer_dims=[full_model.config.hidden_size, len(full_model.config.label2id)])
+            # # transfer weights for head from full model
+            # head.feed_forward.feed_forward[0].load_state_dict(full_model.classifier.state_dict())
+            # del full_model
+
 
     def forward(self, X):
         logits = self.feed_forward(X)
@@ -734,12 +870,7 @@ class BertLMHead(PredictionHead):
                 #TODO resize prediction head decoder for custom vocab
                 raise NotImplementedError("Custom vocab not yet supported for model loading from FARM files")
 
-            config_file = os.path.exists(pretrained_model_name_or_path)
-            model_file = cls._get_model_file(config_file)
-            config = json.load(open(config_file))
-            prediction_head = cls(**config)
-            logger.info("Loading prediction head from {}".format(model_file))
-            prediction_head.load_state_dict(torch.load(model_file, map_location=torch.device("cpu")))
+            super(BertLMHead, cls).load(pretrained_model_name_or_path)
         else:
             # b) pytorch-transformers style
             # load weights from bert model
@@ -857,7 +988,7 @@ class FeedForwardBlock(nn.Module):
     def __init__(self, layer_dims, **kwargs):
         # Todo: Consider having just one input argument
         super(FeedForwardBlock, self).__init__()
-
+        self.layer_dims = layer_dims
         # If read from config the input will be string
         n_layers = len(layer_dims) - 1
         layers_all = []
@@ -881,7 +1012,7 @@ class QuestionAnsweringHead(PredictionHead):
     A question answering head predicts the start and end of the answer on token level.
     """
 
-    def __init__(self, layer_dims, task_name="question_answering", no_ans_threshold=0.0, context_window_size=100, n_best=5, **kwargs):
+    def __init__(self, layer_dims=[768,2], task_name="question_answering", no_ans_threshold=0.0, context_window_size=100, n_best=5, **kwargs):
         """
         :param layer_dims: dimensions of Feed Forward block, e.g. [768,2], for adjusting to BERT embedding. Output should be always 2
         :type layer_dims: List[Int]
@@ -891,12 +1022,14 @@ class QuestionAnsweringHead(PredictionHead):
         :type no_ans_threshold: float
         :param context_window_size: The size, in characters, of the window around the answer span that is used when displaying the context around the answer.
         :type context_window_size: int
-        :param n_best: The number of candidate positive answer spans to consider from each passage
+        :param n_best: The number of candidate positive answer spans to consider from each passage. Same value used as the number of candidates to be considered on document level.
         :type n_best: int
         """
         super(QuestionAnsweringHead, self).__init__()
         self.layer_dims = layer_dims
+        assert self.layer_dims[-1] == 2
         self.feed_forward = FeedForwardBlock(self.layer_dims)
+        logger.info(f"Prediction head initialized with size {self.layer_dims}")
         self.num_labels = self.layer_dims[-1]
         self.ph_output_type = "per_token_squad"
         self.model_type = (
@@ -912,31 +1045,32 @@ class QuestionAnsweringHead(PredictionHead):
     @classmethod
     def load(cls, pretrained_model_name_or_path):
         """
-        Almost identical to a QuestionAnsweringHead. Only difference: we can load the weights from
-         a pretrained language model that was saved in the pytorch-transformers style (all in one model).
+        Load a prediction head from a saved FARM or transformers model. If `pretrained_model_name_or_path`
+        is not a local path, we will try to resolve it with a public model hub (https://huggingface.co/models)
+
+        :param pretrained_model_name_or_path: local path of a saved model or name of a publicly available model.
+                                              Exemplary names:
+                                              - distilbert-base-uncased-distilled-squad
+                                              - bert-large-uncased-whole-word-masking-finetuned-squad
+
+                                              See https://huggingface.co/models for full list
+
         """
 
         if os.path.exists(pretrained_model_name_or_path) \
                 and "config.json" in pretrained_model_name_or_path \
                 and "prediction_head" in pretrained_model_name_or_path:
-            config_file = os.path.exists(pretrained_model_name_or_path)
             # a) FARM style
-            model_file = cls._get_model_file(config_file)
-            config = json.load(open(config_file))
-            prediction_head = cls(**config)
-            logger.info("Loading prediction head from {}".format(model_file))
-            prediction_head.load_state_dict(torch.load(model_file, map_location=torch.device("cpu")))
+            super(QuestionAnsweringHead, cls).load(pretrained_model_name_or_path)
         else:
-            # b) pytorch-transformers style
-            # load weights from bert model
-            # (we might change this later to load directly from a state_dict to generalize for other language models)
-            bert_qa = BertForQuestionAnswering.from_pretrained(pretrained_model_name_or_path)
-
+            # b) transformers style
+            # load all weights from model
+            full_qa_model = AutoModelForQuestionAnswering.from_pretrained(pretrained_model_name_or_path)
             # init empty head
-            head = cls(layer_dims=[bert_qa.config.hidden_size, 2], loss_ignore_index=-1, task_name="question_answering")
-            # load weights
-            head.feed_forward.feed_forward[0].load_state_dict(bert_qa.qa_outputs.state_dict())
-            del bert_qa
+            head = cls(layer_dims=[full_qa_model.config.hidden_size, 2], loss_ignore_index=-1, task_name="question_answering")
+            # transfer weights for head from full model
+            head.feed_forward.feed_forward[0].load_state_dict(full_qa_model.qa_outputs.state_dict())
+            del full_qa_model
 
         return head
 
@@ -1353,11 +1487,13 @@ class QuestionAnsweringHead(PredictionHead):
                             for passage_preds in preds
                             for start, end, score in passage_preds
                             if not (start == -1 and end == -1)]
-        pos_answers_sorted = sorted(pos_answers_flat, key=lambda x: x[2], reverse=True)
+
+        pos_answer_dedup = self.deduplicate(pos_answers_flat)
+        pos_answers_sorted = sorted(pos_answer_dedup, key=lambda x: x[2], reverse=True)
         pos_answers_reduced = pos_answers_sorted[:self.n_best]
         no_answer_pred = [-1, -1, max(no_answer_scores)]
 
-        # TODO this is how big the no_answer threshold needs to be to change a no_answer to a pos answer
+        # This is how big the no_answer threshold needs to be to change a no_answer to a pos answer
         #  (or vice versa). This can in future be used to train the threshold value
         no_ans_gap = max([nas - pbs for nas, pbs in zip(no_answer_scores, passage_best_score)])
 
@@ -1366,6 +1502,21 @@ class QuestionAnsweringHead(PredictionHead):
         else:
             n_preds = pos_answers_reduced
         return n_preds, no_ans_gap
+
+    @staticmethod
+    def deduplicate(flat_pos_answers):
+        # Remove duplicate spans that might be twice predicted in two different passages
+        seen = {}
+        for (start, end, score) in flat_pos_answers:
+            if (start, end) not in seen:
+                seen[(start, end)] = score
+            else:
+                seen_score = seen[(start, end)]
+                if score > seen_score:
+                    seen[(start, end)] = score
+        return [(start, end, score) for (start, end), score in seen.items()]
+
+
 
     ## THIS IS A SIMPLER IMPLEMENTATION OF PICKING BEST ANSWERS FOR A DOCUMENT. MATCHES THE HUGGINGFACE METHOD
     # @staticmethod

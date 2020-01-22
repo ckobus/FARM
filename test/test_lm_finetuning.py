@@ -1,4 +1,6 @@
 import logging
+from pathlib import Path
+
 import numpy as np
 import torch
 
@@ -28,7 +30,7 @@ def test_lm_finetuning(caplog):
     )
 
     processor = BertStyleLMProcessor(
-        data_dir="samples/lm_finetuning",
+        data_dir=Path("samples/lm_finetuning"),
         train_filename="train-sample.txt",
         test_filename="test-sample.txt",
         dev_filename=None,
@@ -60,6 +62,7 @@ def test_lm_finetuning(caplog):
         schedule_opts={'name': 'CosineWarmup', 'warmup_proportion': 0.1})
 
     trainer = Trainer(
+        model=model,
         optimizer=optimizer,
         data_silo=data_silo,
         epochs=n_epochs,
@@ -68,13 +71,13 @@ def test_lm_finetuning(caplog):
         device=device,
     )
 
-    model = trainer.train(model)
+    trainer.train()
 
     # LM embeddings and weight of decoder in head are shared and should therefore be equal
     assert torch.all(
         torch.eq(model.language_model.model.embeddings.word_embeddings.weight, model.prediction_heads[0].decoder.weight))
 
-    save_dir = "testsave/lm_finetuning"
+    save_dir = Path("testsave/lm_finetuning")
     model.save(save_dir)
     processor.save(save_dir)
 
@@ -82,7 +85,7 @@ def test_lm_finetuning(caplog):
         {"text": "Farmer's life is great."},
         {"text": "It's nothing for big city kids though."},
     ]
-    model = Inferencer.load(save_dir, embedder_only=True)
+    model = Inferencer.load(save_dir, task_type="embeddings")
     result = model.extract_vectors(dicts=basic_texts)
     assert result[0]["context"] == ['Farmer', "'", 's', 'life', 'is', 'great', '.']
     assert result[0]["vec"].shape == (768,)
@@ -105,7 +108,7 @@ def test_lm_finetuning_no_next_sentence(caplog):
     )
 
     processor = BertStyleLMProcessor(
-        data_dir="samples/lm_finetuning",
+        data_dir=Path("samples/lm_finetuning"),
         train_filename="train-sample.txt",
         test_filename="test-sample.txt",
         dev_filename=None,
@@ -136,6 +139,7 @@ def test_lm_finetuning_no_next_sentence(caplog):
         schedule_opts={'name': 'CosineWarmup', 'warmup_proportion': 0.1}
     )
     trainer = Trainer(
+        model=model,
         optimizer=optimizer,
         data_silo=data_silo,
         epochs=n_epochs,
@@ -145,13 +149,13 @@ def test_lm_finetuning_no_next_sentence(caplog):
         device=device,
     )
 
-    model = trainer.train(model)
+    trainer.train()
 
     # LM embeddings and weight of decoder in head are shared and should therefore be equal
     assert torch.all(
         torch.eq(model.language_model.model.embeddings.word_embeddings.weight, model.prediction_heads[0].decoder.weight))
 
-    save_dir = "testsave/lm_finetuning_no_nsp"
+    save_dir = Path("testsave/lm_finetuning_no_nsp")
     model.save(save_dir)
     processor.save(save_dir)
 
@@ -159,7 +163,7 @@ def test_lm_finetuning_no_next_sentence(caplog):
         {"text": "Farmer's life is great."},
         {"text": "It's nothing for big city kids though."},
     ]
-    model = Inferencer.load(save_dir, embedder_only=True)
+    model = Inferencer.load(save_dir, task_type="embeddings")
     result = model.extract_vectors(dicts=basic_texts)
     assert result[0]["context"] == ['Farmer', "'", 's', 'life', 'is', 'great', '.']
     assert result[0]["vec"].shape == (768,)
@@ -183,7 +187,7 @@ def test_lm_finetuning_custom_vocab(caplog):
     tokenizer.add_tokens(["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbb", "ccccccccccccccccccccccc"])
 
     processor = BertStyleLMProcessor(
-        data_dir="samples/lm_finetuning",
+        data_dir=Path("samples/lm_finetuning"),
         train_filename="train-sample.txt",
         test_filename="test-sample.txt",
         dev_filename=None,
@@ -215,6 +219,7 @@ def test_lm_finetuning_custom_vocab(caplog):
         schedule_opts={'name': 'CosineWarmup', 'warmup_proportion': 0.1}
     )
     trainer = Trainer(
+        model=model,
         optimizer=optimizer,
         data_silo=data_silo,
         epochs=n_epochs,
@@ -224,13 +229,13 @@ def test_lm_finetuning_custom_vocab(caplog):
         device=device,
     )
 
-    model = trainer.train(model)
+    trainer.train()
 
     # LM embeddings and weight of decoder in head are shared and should therefore be equal
     assert torch.all(
         torch.eq(model.language_model.model.embeddings.word_embeddings.weight, model.prediction_heads[0].decoder.weight))
 
-    save_dir = "testsave/lm_finetuning"
+    save_dir = Path("testsave/lm_finetuning")
     model.save(save_dir)
     processor.save(save_dir)
 
@@ -238,7 +243,7 @@ def test_lm_finetuning_custom_vocab(caplog):
         {"text": "Farmer's life is great."},
         {"text": "It's nothing for big city kids though."},
     ]
-    model = Inferencer.load(save_dir, embedder_only=True)
+    model = Inferencer.load(save_dir, task_type="embeddings")
     result = model.extract_vectors(dicts=basic_texts)
     assert result[0]["context"] == ['Farmer', "'", 's', 'life', 'is', 'great', '.']
     assert result[0]["vec"].shape == (768,)

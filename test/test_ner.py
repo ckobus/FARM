@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 
 from farm.data_handler.data_silo import DataSilo
@@ -19,11 +21,11 @@ def test_ner(caplog=None):
         caplog.set_level(logging.CRITICAL)
 
     set_all_seeds(seed=42)
-    device, n_gpu = initialize_device_settings(use_cuda=True)
+    device, n_gpu = initialize_device_settings(use_cuda=False)
     n_epochs = 5
     batch_size = 2
     evaluate_every = 1
-    lang_model = "bert-base-german-cased"
+    lang_model = "distilbert-base-german-cased"
 
     tokenizer = Tokenizer.load(
         pretrained_model_name_or_path=lang_model, do_lower_case=False
@@ -35,7 +37,7 @@ def test_ner(caplog=None):
     processor = NERProcessor(
         tokenizer=tokenizer,
         max_seq_len=8,
-        data_dir="samples/ner",
+        data_dir=Path("samples/ner"),
         train_filename="train-sample.txt",
         dev_filename="dev-sample.txt",
         test_filename=None,
@@ -44,9 +46,9 @@ def test_ner(caplog=None):
         metric="seq_f1"
     )
 
-    data_silo = DataSilo(processor=processor, batch_size=batch_size)
+    data_silo = DataSilo(processor=processor, batch_size=batch_size, max_processes=1)
     language_model = LanguageModel.load(lang_model)
-    prediction_head = TokenClassificationHead(layer_dims=[768, len(ner_labels)])
+    prediction_head = TokenClassificationHead(num_labels=13)
 
     model = AdaptiveModel(
         language_model=language_model,
@@ -66,6 +68,7 @@ def test_ner(caplog=None):
         schedule_opts={'name': 'LinearWarmup', 'warmup_proportion': 0.1}
     )
     trainer = Trainer(
+        model=model,
         optimizer=optimizer,
         data_silo=data_silo,
         epochs=n_epochs,
@@ -75,8 +78,8 @@ def test_ner(caplog=None):
         device=device,
     )
 
-    save_dir = "testsave/ner"
-    model = trainer.train(model)
+    save_dir = Path("testsave/ner")
+    model = trainer.train()
     model.save(save_dir)
     processor.save(save_dir)
 
@@ -88,7 +91,8 @@ def test_ner(caplog=None):
     print(result)
     #assert result[0]["predictions"][0]["context"] == "sagte"
     #assert isinstance(result[0]["predictions"][0]["probability"], np.float32)
-
+    result2 = model.inference_from_dicts(dicts=basic_texts, rest_api_schema=True)
+    assert result == result2
 
 if __name__ == "__main__":
     test_ner()

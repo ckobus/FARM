@@ -1,4 +1,6 @@
 import logging
+from pathlib import Path
+
 import numpy as np
 
 from farm.data_handler.data_silo import DataSilo
@@ -18,7 +20,7 @@ def test_doc_classification(caplog=None):
         caplog.set_level(logging.CRITICAL)
 
     set_all_seeds(seed=42)
-    device, n_gpu = initialize_device_settings(use_cuda=True)
+    device, n_gpu = initialize_device_settings(use_cuda=False)
     n_epochs = 1
     batch_size = 1
     evaluate_every = 2
@@ -30,7 +32,7 @@ def test_doc_classification(caplog=None):
 
     processor = TextClassificationProcessor(tokenizer=tokenizer,
                                             max_seq_len=8,
-                                            data_dir="samples/doc_class",
+                                            data_dir=Path("samples/doc_class"),
                                             train_filename="train-sample.tsv",
                                             label_list=["OTHER", "OFFENSE"],
                                             metric="f1_macro",
@@ -44,7 +46,7 @@ def test_doc_classification(caplog=None):
         batch_size=batch_size)
 
     language_model = LanguageModel.load(lang_model)
-    prediction_head = TextClassificationHead(layer_dims=[768, len(processor.tasks["text_classification"]["label_list"])])
+    prediction_head = TextClassificationHead(num_labels=2)
     model = AdaptiveModel(
         language_model=language_model,
         prediction_heads=[prediction_head],
@@ -62,6 +64,7 @@ def test_doc_classification(caplog=None):
         schedule_opts=None)
 
     trainer = Trainer(
+        model=model,
         optimizer=optimizer,
         data_silo=data_silo,
         epochs=n_epochs,
@@ -70,9 +73,9 @@ def test_doc_classification(caplog=None):
         evaluate_every=evaluate_every,
         device=device)
 
-    model = trainer.train(model)
+    trainer.train()
 
-    save_dir = "testsave/doc_class"
+    save_dir = Path("testsave/doc_class")
     model.save(save_dir)
     processor.save(save_dir)
 
@@ -85,7 +88,8 @@ def test_doc_classification(caplog=None):
     inf = Inferencer.load(save_dir, batch_size=2)
     result = inf.inference_from_dicts(dicts=basic_texts)
     assert isinstance(result[0]["predictions"][0]["probability"], np.float32)
-
+    result2 = inf.inference_from_dicts(dicts=basic_texts, rest_api_schema=True)
+    assert result == result2
 
 if __name__ == "__main__":
     test_doc_classification()
