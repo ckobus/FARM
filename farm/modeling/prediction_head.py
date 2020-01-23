@@ -532,7 +532,7 @@ class TextClassificationHead(PredictionHead):
         passage_scores = []
 
         document_labels_sorted = sorted(preds, key=lambda x: x[1], reverse=True)
-        document_labels_reduced = document_labels_sorted[:self.n_best]
+        document_labels_reduced = document_labels_sorted[:1]
 
         return document_labels_reduced
         
