@@ -152,7 +152,7 @@ def get_candidates(predictions, order=False, label_model="squad"):
         preds = predictions[0]
         for p in preds:
             p0 = p['predictions'][0]
-            for j, pred_qa_0 in enumerate(p0['answers'][0]):
+            for j, pred_qa_0 in enumerate(p0['answers']):
                 id = p0["question_id"]
                 ans_type = no_answer_label
                 ans_type_prob =  1.0
