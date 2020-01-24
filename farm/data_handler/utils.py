@@ -111,7 +111,7 @@ def read_squad_file(filename, proxies=None):
 
 def get_candidates(predictions, order=False, label_model="squad"):
     candidates = []
-    Candidate = namedtuple('Candidate', ['ans_type_num', 'ans_type', 'ans_type_prob', 'span_score', 'answer_score', 'span', 'context_string', 'id'])
+    Candidate = namedtuple('Candidate', ['ans_type_num', 'ans_type', 'ans_type_prob', 'span_score', 'span_rank', 'span', 'context_string', 'id'])
     
     no_answer_label = None
     if label_model == "squad":
@@ -136,34 +136,33 @@ def get_candidates(predictions, order=False, label_model="squad"):
         QA_IND = 1 # QA PREDICTION HEAD ORDER
         for i in range(len(predictions[0])):
             pred_text_cl_0 = predictions[TEXT_CL_IND][i]['predictions'][0]['answers'][0]
-            pred_qa_0 = predictions[QA_IND][i]['predictions'][0]['answers'][0]
             id = predictions[QA_IND][i]['predictions'][0]["question_id"]
-            ans_type = pred_text_cl_0['label']
-            ans_type_prob = pred_text_cl_0['probability'].item()
 
-            span = pred_qa_0['answer']
-            span_score = pred_qa_0['score']
-            context_string = pred_qa_0['context']
-            answer_score = 0.0 if ans_type == no_answer_label else ans_type_prob * span_score
+            for j, pred_qa_0 in enumerate(predictions[QA_IND][i]['predictions'][0]['answers']):
+                ans_type = pred_text_cl_0['label']
+                ans_type_prob = pred_text_cl_0['probability'].item()
 
-            c = Candidate(ans_type_num=type_orders[ans_type], ans_type=ans_type, ans_type_prob=ans_type_prob, span_score=span_score, answer_score=answer_score, span=span, context_string=context_string, id=id)
-            candidates.append(c)
+                span = pred_qa_0['answer']
+                span_score = pred_qa_0['score']
+                context_string = pred_qa_0['context']
+
+                c = Candidate(ans_type_num=type_orders[ans_type], ans_type=ans_type, ans_type_prob=ans_type_prob, span_score=span_score, span_rank=j+1, span=span, context_string=context_string, id=id)
+                candidates.append(c)
     else:
         preds = predictions[0]
         for p in preds:
             p0 = p['predictions'][0]
-            pred_qa_0 = p0['answers'][0]
-            id = p0["question_id"]
-            ans_type = no_answer_label
-            ans_type_prob =  1.0
-            span = pred_qa_0['answer']
-            span_score = pred_qa_0['score']
-            context_string = pred_qa_0['context']
-            if span != '':
-                ans_type = 'SPAN'
-            answer_score = 0.0 if ans_type == no_answer_label else ans_type_prob * span_score
-            c = Candidate(ans_type_num=type_orders[ans_type], ans_type=ans_type, ans_type_prob=ans_type_prob, span_score=span_score, answer_score=answer_score, span=span, context_string=context_string, id=id)
-            candidates.append(c)
+            for j, pred_qa_0 in enumerate(p0['answers'][0]):
+                id = p0["question_id"]
+                ans_type = no_answer_label
+                ans_type_prob =  1.0
+                span = pred_qa_0['answer']
+                span_score = pred_qa_0['score']
+                context_string = pred_qa_0['context']
+                if span != '':
+                    ans_type = 'SPAN'
+                c = Candidate(ans_type_num=type_orders[ans_type], ans_type=ans_type, ans_type_prob=ans_type_prob, span_score=span_score, span_rank=j+1, span=span, context_string=context_string, id=id)
+                candidates.append(c)
 
     if order:
         candidates = sorted(candidates, key=lambda x: (x[0], x[4]), reverse=True)
