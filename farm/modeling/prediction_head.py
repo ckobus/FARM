@@ -396,7 +396,7 @@ class TextClassificationHead(PredictionHead):
             for label_t, score in pred_d:
                 full_preds.append({
                     "label": label_t,
-                    "probability": score
+                    "probability": score.item()
                 })
             curr_dict["id"] = squad_id
             curr_dict["preds"] = full_preds
