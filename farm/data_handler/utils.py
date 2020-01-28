@@ -140,7 +140,7 @@ def get_candidates(predictions, order=False, label_model="squad"):
 
             for j, pred_qa_0 in enumerate(predictions[QA_IND][i]['predictions'][0]['answers']):
                 ans_type = pred_text_cl_0['label']
-                ans_type_prob = pred_text_cl_0['probability'].item()
+                ans_type_prob = pred_text_cl_0['probability']
 
                 span = pred_qa_0['answer']
                 span_score = pred_qa_0['score']
